@@ -16,7 +16,6 @@ class XService
     {
         $this->region = strtoupper($region);
 
-        // Mapeo dinámico según tus variables del .env
         $this->config = [
             'consumer_key'    => env("TWITTER_API_KEY_{$this->region}"),
             'consumer_secret' => env("TWITTER_API_SECRET_{$this->region}"),
@@ -24,9 +23,11 @@ class XService
             'token_secret'    => env("TWITTER_ACCESS_SECRET_{$this->region}"),
         ];
 
-        // Validación rápida para logs
-        if (empty($this->config['consumer_key'])) {
-            Log::error("XService: No se encontraron credenciales para {$this->region} en el .env");
+        // Si falta alguna llave, lanzamos un error claro antes de intentar el POST
+        foreach ($this->config as $key => $value) {
+            if (empty($value)) {
+                throw new \Exception("Falta la configuración {$key} para la región {$this->region} en el .env");
+            }
         }
     }
 
