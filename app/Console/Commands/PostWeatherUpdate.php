@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Services\WeatherService;
+use App\Services\MeteoDataService; // El nuevo servicio
 use App\Services\ImageService;
 use App\Services\AstroService;
 use App\Services\XService;
@@ -13,16 +14,22 @@ use Carbon\Carbon;
 class PostWeatherUpdate extends Command
 {
     protected $signature = 'weather:post {region=STGO} {--type=clima}';
-    protected $description = 'Publica el clima con un toque local y humano.';
+    protected $description = 'Publica el clima, viento y humedad con un toque local.';
 
     protected $weather;
+    protected $meteo; // Nuevo
     protected $image;
     protected $astro;
 
-    public function __construct(WeatherService $weather, ImageService $image, AstroService $astro)
-    {
+    public function __construct(
+        WeatherService $weather,
+        MeteoDataService $meteo,
+        ImageService $image,
+        AstroService $astro
+    ) {
         parent::__construct();
         $this->weather = $weather;
+        $this->meteo = $meteo;
         $this->image = $image;
         $this->astro = $astro;
     }
@@ -32,25 +39,33 @@ class PostWeatherUpdate extends Command
         $region = strtoupper($this->argument('region'));
         $type = $this->option('type');
 
-        $cityNames = [
-            'STGO' => 'Santiago',
-            'ANTOF' => 'Antofagasta'
+        // Configuración de ciudades y zonas horarias
+        $config = [
+            'STGO'  => ['name' => 'Santiago', 'tz' => 'America/Santiago'],
+            'ANTOF' => ['name' => 'Antofagasta', 'tz' => 'America/Santiago'],
+            // 'PUQ'   => ['name' => 'Punta Arenas', 'tz' => 'America/Punta_Arenas'],
         ];
 
-        $cityName = $cityNames[$region] ?? $region;
-        $now = Carbon::now('America/Santiago');
+        $cityName = $config[$region]['name'] ?? $region;
+        $timezone = $config[$region]['tz'] ?? 'America/Santiago';
+
+        $now = Carbon::now($timezone);
         $horaActual = $now->format('H:i');
 
-        $this->info("Iniciando proceso para: {$cityName} a las {$horaActual}...");
+        $this->info("Iniciando proceso para: {$cityName} a las {$horaActual} ({$timezone})...");
 
         try {
-            // 1. Obtener Temperatura
+            // 1. Obtener Temperatura Principal
             $temp = $this->weather->getTemperature($region);
             if (!$temp) {
                 throw new \Exception("No se obtuvo temperatura para {$region}");
             }
 
-            // 2. Obtener Datos Astronómicos y Mensaje de la Luna
+            // 2. Obtener Extras (Viento y Humedad) desde el nuevo servicio
+            // Usamos la URL que ya tienes mapeada en el WeatherService para esa región
+            $extras = $this->meteo->getStationDetails($region);
+
+            // 3. Obtener Datos Astronómicos y Luna
             $sunData = $this->astro->getSunData($region);
             $moonMessage = $this->weather->getMoonMessage($region);
 
@@ -70,17 +85,26 @@ class PostWeatherUpdate extends Command
                 $text .= "#Atardecer #Chile #{$cityName}";
 
             } else {
-                // TIPO: CLIMA (Reporte estándar)
+                // TIPO: CLIMA (Reporte estándar enriquecido)
                 $text = "🌡️ Temperatura en {$cityName} a las {$horaActual}: {$temp}°C\n";
+
+                // Inyectamos Humedad y Viento si existen
+                if (!empty($extras['humedad']) || !empty($extras['viento'])) {
+                    $lineaExtras = "";
+                    if ($extras['humedad']) $lineaExtras .= "💧 Humedad: {$extras['humedad']}% ";
+                    if ($extras['viento'])  $lineaExtras .= "🌬️ Viento: {$extras['viento']} km/h";
+                    $text .= trim($lineaExtras) . "\n";
+                }
+
                 $text .= "{$moonMessage}\n";
                 $text .= "#Chile #Clima #{$cityName}";
             }
 
-            // 3. Envío a X (Twitter)
+            // 4. Envío a X (Twitter)
             $xService = new XService($region);
 
             if ($type === 'clima') {
-                $this->info("Enviando reporte de texto local...");
+                $this->info("Enviando reporte de texto con extras...");
                 $xService->sendTweet($text);
             } else {
                 $this->info("Generando imagen para evento especial...");
