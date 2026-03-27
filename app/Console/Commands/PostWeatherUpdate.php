@@ -32,24 +32,28 @@ class PostWeatherUpdate extends Command
         $region = strtoupper($this->argument('region'));
         $type = $this->option('type');
 
-        // Mapeo para el toque local
         $cityNames = [
             'STGO' => 'Santiago',
             'ANTOF' => 'Antofagasta'
         ];
+
         $cityName = $cityNames[$region] ?? $region;
         $horaActual = Carbon::now('America/Santiago')->format('H:i');
 
         $this->info("Iniciando proceso para: {$cityName} a las {$horaActual}...");
 
         try {
+            // 1. Obtener Temperatura
             $temp = $this->weather->getTemperature($region);
             if (!$temp) {
                 throw new \Exception("No se obtuvo temperatura para {$region}");
             }
 
+            // 2. Obtener Datos Astronómicos (para imágenes o cálculos extra)
             $sunData = $this->astro->getSunData($region);
-            $moonData = $this->weather->getMoonData($region);
+
+            // 3. Obtener el mensaje inteligente de la Luna (Cordillera / Visibilidad)
+            $moonMessage = $this->weather->getMoonMessage($region);
 
             $text = "";
 
@@ -63,25 +67,17 @@ class PostWeatherUpdate extends Command
                 $text = "🌇 ¡Buenas tardes, {$cityName}!\n";
                 $text .= "Temperatura actual a las {$horaActual}: {$temp}°C\n";
                 $text .= "Faltan 30 min para el ocaso ({$sunData['sunset']}).\n";
-
-                if ($moonData) {
-                    $emoji = $moonData['fase_emoji'] ?? '🌙';
-                    $fase = $moonData['fase_nombre'] ?? 'Luna';
-                    $text .= "{$emoji} Esta noche: {$fase} (" . round($moonData['iluminacion_pct']) . "%).\n";
-                }
+                $text .= "{$moonMessage}\n"; // Aquí inyectamos el mensaje inteligente
                 $text .= "#Atardecer #Chile #{$cityName}";
 
             } else {
-                // TIPO: CLIMA (El formato que te dio éxito)
-                $text = "🌡️ Temperatura actual en {$cityName} a las {$horaActual}: {$temp}°C\n\n";
-
-                if ($moonData) {
-                    $emoji = $moonData['fase_emoji'] ?? '🌙';
-                    $text .= "Luna: {$emoji} " . round($moonData['iluminacion_pct']) . "% iluminada.\n";
-                }
+                // TIPO: CLIMA (Reporte estándar)
+                $text = "🌡️ Temperatura en {$cityName} a las {$horaActual}: {$temp}°C\n\n";
+                $text .= "{$moonMessage}\n"; // Aquí inyectamos el mensaje inteligente
                 $text .= "#Chile #Clima #{$cityName}";
             }
 
+            // 4. Envío a X (Twitter)
             $xService = new XService($region);
 
             if ($type === 'clima') {
@@ -89,7 +85,9 @@ class PostWeatherUpdate extends Command
                 $xService->sendTweet($text);
             } else {
                 $this->info("Generando imagen para evento especial...");
-                $imagePath = $this->image->generate($region, $temp, $moonData, $sunData, $type);
+                // Para la imagen seguimos pasando el array crudo por si el ImageService lo necesita
+                $moonDataRaw = $this->weather->getMoonData($region);
+                $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type);
                 $xService->sendTweet($text, $imagePath);
             }
 

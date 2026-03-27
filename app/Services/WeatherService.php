@@ -30,12 +30,10 @@ class WeatherService
             }
 
             $crawler = new Crawler($response->body());
-            // Nodo display-1: temperatura grande en MeteoChile
             $tempNode = $crawler->filter('h1.display-1');
 
             if ($tempNode->count() > 0) {
                 $temp = trim($tempNode->text());
-                // Retornamos el número limpio (ej: 21.4)
                 return str_replace(['°', 'C', ' '], '', $temp);
             }
 
@@ -49,24 +47,60 @@ class WeatherService
     }
 
     /**
-     * Consulta la API de Python para obtener datos lunares (Fase, Emoji, Iluminación).
+     * Consulta la API de Python y retorna un mensaje contextualizado a la geografía chilena.
+     */
+    public function getMoonMessage(string $region): string
+    {
+        $moonData = $this->getMoonData($region);
+
+        if (!$moonData) {
+            return "Luna: Información no disponible.";
+        }
+
+        $altura = (float)($moonData['altura_grados'] ?? 0);
+        $iluminacion = $moonData['iluminacion_pct'] ?? 0;
+        $faseEmoji = $moonData['fase_emoji'] ?? '🌙';
+        $faseNombre = $moonData['fase_nombre'] ?? 'Luna';
+        $horaActual = now()->hour;
+
+        // --- LÓGICA DE VISIBILIDAD CHILENA ---
+
+        // 1. Si la altura es negativa, está bajo el horizonte
+        if ($altura < 0) {
+            return "Luna bajo el horizonte.";
+        }
+
+        // 2. Si está entre 0 y 18 grados, está detrás de la Cordillera de los Andes
+        if ($altura >= 0 && $altura < 18) {
+            return "🏔️ Luna tras la cordillera.";
+        }
+
+        // 3. Si ya superó los 18 grados, es visible
+        if ($horaActual >= 7 && $horaActual < 19) {
+            // Visibilidad diurna
+            return "🔭 Luna visible de día: {$faseEmoji} ({$iluminacion}% iluminada).";
+        }
+
+        // Visibilidad nocturna estándar
+        return "Luna: {$faseEmoji} {$faseNombre} ({$iluminacion}% iluminada).";
+    }
+
+    /**
+     * Consulta base a la API de Python.
      */
     public function getMoonData(string $region): ?array
     {
-        // Obtenemos coordenadas desde AstroService
         $astro = new AstroService();
         $coords = $astro->getCoords($region);
-
         $url = env('MOON_API_URL');
-        $secret = "8Y++wM>9bI9C"; // Tu clave secreta configurada en Python
+        $secret = "8Y++wM>9bI9C";
 
         if (empty($url)) {
-            Log::error("WeatherService: MOON_API_URL no definida en .env");
+            Log::error("WeatherService: MOON_API_URL no definida.");
             return null;
         }
 
         try {
-            // Usamos el cliente Http de Laravel para mayor simplicidad y manejo de JSON
             $response = Http::timeout(15)
                 ->withHeaders(['Content-Type' => 'application/json'])
                 ->post($url, [
@@ -75,15 +109,10 @@ class WeatherService
                     'lon'        => (float)$coords['lon'],
                 ]);
 
-            if ($response->successful()) {
-                return $response->json();
-            }
-
-            Log::error("WeatherService - Error API Luna ({$region}): " . $response->status() . " - " . $response->body());
-            return null;
+            return $response->successful() ? $response->json() : null;
 
         } catch (\Exception $e) {
-            Log::error("WeatherService - Exception API Luna ({$region}): " . $e->getMessage());
+            Log::error("WeatherService - Exception API Luna: " . $e->getMessage());
             return null;
         }
     }
