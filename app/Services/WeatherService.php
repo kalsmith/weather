@@ -49,34 +49,25 @@ class WeatherService
     /**
      * Consulta la API de Python (Hosting) para obtener datos astronómicos.
      */
-    public function getMoonData(string $region = 'STGO'): ?array
+    public function getMoonData(string $region): ?array
     {
-        // Coordenadas base (puedes moverlas al config o .env)
-        $coords = [
-            'STGO'  => ['lat' => -33.4489, 'lon' => -70.6693],
-            'ANTOF' => ['lat' => -23.65,   'lon' => -70.4],
-        ];
-
-        $pos = $coords[strtoupper($region)] ?? $coords['STGO'];
+        $coords = (new AstroService())->getCoords($region);
+        $url = env('MOON_API_URL'); // https://pythonweather.soltys.cl/luna
 
         try {
-            $response = Http::withOptions(['verify' => false]) // Por si el SSL del hosting da líos
-                ->timeout(5)
-                ->post(env('MOON_API_URL', 'https://pythonweather.soltys.cl/luna'), [
-                    'secret_key' => env('MOON_API_SECRET', '8Y++wM>9bI9C'),
-                    'lat' => $pos['lat'],
-                    'lon' => $pos['lon']
-                ]);
+            $client = new \GuzzleHttp\Client();
+            $response = $client->post($url, [
+                'json' => [
+                    'secret_key' => '8Y++wM>9bI9C', // La que tienes en main.py
+                    'lat' => $coords['lat'],
+                    'lon' => $coords['lon'],
+                ],
+                'timeout' => 10 // Skyfield puede ser lento procesando el BSP
+            ]);
 
-            if ($response->successful()) {
-                return $response->json();
-            }
-
-            Log::error("API Luna falló para {$region}: " . $response->status());
-            return null;
-
+            return json_decode($response->getBody()->getContents(), true);
         } catch (\Exception $e) {
-            Log::error("Error conexión API Luna ({$region}): " . $e->getMessage());
+            Log::error("Error API Luna: " . $e->getMessage());
             return null;
         }
     }

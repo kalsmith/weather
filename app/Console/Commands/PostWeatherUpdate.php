@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\Log;
 class PostWeatherUpdate extends Command
 {
     /**
-     * Firma actualizada para aceptar la opción --type
-     * Uso: php artisan weather:post STGO --type=sunrise
+     * Firma que acepta región y tipo de reporte.
+     * Tipos válidos: clima, sunrise, sunset
      */
     protected $signature = 'weather:post {region=STGO} {--type=clima}';
 
@@ -34,7 +34,7 @@ class PostWeatherUpdate extends Command
     public function handle()
     {
         $region = strtoupper($this->argument('region'));
-        $type = $this->option('type'); // 'clima' o 'sunrise'
+        $type = $this->option('type'); // clima, sunrise o sunset
 
         $this->info("Iniciando proceso para: {$region} (Tipo: {$type})...");
 
@@ -49,15 +49,25 @@ class PostWeatherUpdate extends Command
             // 2. Obtener Datos Astronómicos (AstroService)
             $sunData = $this->astro->getSunData($region);
 
-            // 3. Obtener Datos Lunares (Python API)
+            // 3. Obtener Datos Lunares (Desde tu main.py en Python)
             $moonData = $this->weather->getMoonData($region);
 
-            // 4. Personalizar el texto según el tipo de post
+            // 4. Personalizar el texto según el evento
             if ($type === 'sunrise') {
                 $text = "🌅 ¡Buenos días, {$region}!\n";
                 $text .= "Faltan 30 min para el amanecer ({$sunData['sunrise']}).\n";
                 $text .= "Temp actual: {$temp}°C\n";
                 $text .= "#Amanecer #Chile #{$region}";
+
+            } elseif ($type === 'sunset') {
+                $text = "🌇 ¡Buenas tardes, {$region}!\n";
+                $text .= "Faltan 30 min para el ocaso ({$sunData['sunset']}).\n";
+                if ($moonData) {
+                    $text .= "Esta noche la luna tendrá un " . round($moonData['iluminacion_pct'] ?? 0) . "% de iluminación.\n";
+                }
+                $text .= "Temp actual: {$temp}°C\n";
+                $text .= "#Atardecer #Chile #{$region}";
+
             } else {
                 $text = "🌡️ Reporte Actualizado ({$region})\n";
                 $text .= "Temperatura: {$temp}°C\n";
@@ -67,7 +77,7 @@ class PostWeatherUpdate extends Command
                 $text .= "#Chile #Clima #{$region}";
             }
 
-            // 5. Generar la Imagen (Ahora pasamos sunData también)
+            // 5. Generar la Imagen
             $this->info("Generando imagen...");
             $imagePath = $this->image->generate($region, $temp, $moonData, $sunData);
 
@@ -77,7 +87,6 @@ class PostWeatherUpdate extends Command
             }
 
             // 6. Publicar en X (Twitter)
-            $this->info("Publicando en X...");
             $xService = new XService($region);
             $xService->sendTweet($text, $imagePath);
 

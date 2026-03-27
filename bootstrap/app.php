@@ -31,6 +31,15 @@ return Application::configure(basePath: dirname(__DIR__))
                 return (new AstroService())->isThirtyMinsBeforeSunrise('STGO');
             });
 
+        // Reporte especial 30 min antes del OCASO
+        $schedule->command('weather:post STGO --type=sunset')
+            ->everyMinute()
+            ->when(function () {
+                $data = (new AstroService())->getSunData('STGO');
+                $thirtyMinsBefore = $data['sunset_raw'] - (30 * 60);
+                return date('H:i') === date('H:i', $thirtyMinsBefore);
+            });
+
         // 3. Reporte especial 30 min antes del amanecer (Antofagasta)
         $schedule->command('weather:post ANTOF --type=sunrise')
             ->everyMinute()
