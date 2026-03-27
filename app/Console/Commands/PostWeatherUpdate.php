@@ -49,7 +49,7 @@ class PostWeatherUpdate extends Command
             // 2. Obtener Datos Astronómicos (AstroService)
             $sunData = $this->astro->getSunData($region);
 
-            // 3. Obtener Datos Lunares (Desde tu main.py en Python)
+            // 3. Obtener Datos Lunares (Desde tu nuevo main.py con fase_emoji y fase_nombre)
             $moonData = $this->weather->getMoonData($region);
 
             // 4. Personalizar el texto según el evento
@@ -62,22 +62,29 @@ class PostWeatherUpdate extends Command
             } elseif ($type === 'sunset') {
                 $text = "🌇 ¡Buenas tardes, {$region}!\n";
                 $text .= "Faltan 30 min para el ocaso ({$sunData['sunset']}).\n";
+
                 if ($moonData) {
-                    $text .= "Esta noche la luna tendrá un " . round($moonData['iluminacion_pct'] ?? 0) . "% de iluminación.\n";
+                    $emoji = $moonData['fase_emoji'] ?? '🌙';
+                    $fase = $moonData['fase_nombre'] ?? 'Luna';
+                    $ilum = round($moonData['iluminacion_pct'] ?? 0);
+                    $text .= "{$emoji} Esta noche: {$fase} ({$ilum}% iluminada).\n";
                 }
+
                 $text .= "Temp actual: {$temp}°C\n";
                 $text .= "#Atardecer #Chile #{$region}";
 
             } else {
                 $text = "🌡️ Reporte Actualizado ({$region})\n";
                 $text .= "Temperatura: {$temp}°C\n";
+
                 if ($moonData) {
-                    $text .= "Luna: " . round($moonData['iluminacion_pct'] ?? 0) . "% iluminada.\n";
+                    $emoji = $moonData['fase_emoji'] ?? '🌙';
+                    $text .= "Luna: {$emoji} " . round($moonData['iluminacion_pct'] ?? 0) . "% iluminada.\n";
                 }
                 $text .= "#Chile #Clima #{$region}";
             }
 
-            // 5. Generar la Imagen (Añadimos $type para que el Service elija el fondo)
+            // 5. Generar la Imagen (Añadimos $type para que el Service elija el fondo nocturno si aplica)
             $this->info("Generando imagen con estilo: {$type}...");
             $imagePath = $this->image->generate($region, $temp, $moonData, $sunData, $type);
 

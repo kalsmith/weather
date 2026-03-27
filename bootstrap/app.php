@@ -3,7 +3,7 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Console\Scheduling\Schedule; // Importante
+use Illuminate\Console\Scheduling\Schedule;
 use App\Services\AstroService;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -20,31 +20,39 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withSchedule(function (Schedule $schedule): void {
 
-        // 1. Reporte de clima cada 4 horas (Standard)
+        $astro = new AstroService();
+
+        // 1. Reportes de clima estándar cada 4 horas
         $schedule->command('weather:post STGO')->everyFourHours();
         $schedule->command('weather:post ANTOF')->everyFourHours();
 
-        // 2. Reporte especial 30 min antes del amanecer (Santiago)
+        // ==============================
+        // SANTIAGO (STGO)
+        // ==============================
+
+        // Reporte 30 min antes del Amanecer
         $schedule->command('weather:post STGO --type=sunrise')
             ->everyMinute()
-            ->when(function () {
-                return (new AstroService())->isThirtyMinsBeforeSunrise('STGO');
-            });
+            ->when(fn() => $astro->isThirtyMinsBeforeSunrise('STGO'));
 
-        // Reporte especial 30 min antes del OCASO
+        // Reporte 30 min antes del Ocaso
         $schedule->command('weather:post STGO --type=sunset')
             ->everyMinute()
-            ->when(function () {
-                $data = (new AstroService())->getSunData('STGO');
-                $thirtyMinsBefore = $data['sunset_raw'] - (30 * 60);
-                return date('H:i') === date('H:i', $thirtyMinsBefore);
-            });
+            ->when(fn() => $astro->isThirtyMinsBeforeSunset('STGO'));
 
-        // 3. Reporte especial 30 min antes del amanecer (Antofagasta)
+
+        // ==============================
+        // ANTOFAGASTA (ANTOF)
+        // ==============================
+
+        // Reporte 30 min antes del Amanecer
         $schedule->command('weather:post ANTOF --type=sunrise')
             ->everyMinute()
-            ->when(function () {
-                return (new AstroService())->isThirtyMinsBeforeSunrise('ANTOF');
-            });
+            ->when(fn() => $astro->isThirtyMinsBeforeSunrise('ANTOF'));
+
+        // Reporte 30 min antes del Ocaso
+        $schedule->command('weather:post ANTOF --type=sunset')
+            ->everyMinute()
+            ->when(fn() => $astro->isThirtyMinsBeforeSunset('ANTOF'));
 
     })->create();
