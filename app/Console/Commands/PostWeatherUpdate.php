@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Services\WeatherService;
+use App\Services\UVService; // Inyectamos el nuevo servicio
 use App\Services\ImageService;
 use App\Services\AstroService;
 use App\Services\XService;
@@ -13,16 +14,18 @@ use Carbon\Carbon;
 class PostWeatherUpdate extends Command
 {
     protected $signature = 'weather:post {region=STGO} {--type=clima}';
-    protected $description = 'Publica el clima con un toque local y humano.';
+    protected $description = 'Publica el clima y radiación UV con un toque local.';
 
     protected $weather;
+    protected $uv; // Nuevo
     protected $image;
     protected $astro;
 
-    public function __construct(WeatherService $weather, ImageService $image, AstroService $astro)
+    public function __construct(WeatherService $weather, UVService $uv, ImageService $image, AstroService $astro)
     {
         parent::__construct();
         $this->weather = $weather;
+        $this->uv = $uv;
         $this->image = $image;
         $this->astro = $astro;
     }
@@ -38,7 +41,9 @@ class PostWeatherUpdate extends Command
         ];
 
         $cityName = $cityNames[$region] ?? $region;
-        $horaActual = Carbon::now('America/Santiago')->format('H:i');
+        $now = Carbon::now('America/Santiago');
+        $horaActual = $now->format('H:i');
+        $horaInt = $now->hour;
 
         $this->info("Iniciando proceso para: {$cityName} a las {$horaActual}...");
 
@@ -49,31 +54,44 @@ class PostWeatherUpdate extends Command
                 throw new \Exception("No se obtuvo temperatura para {$region}");
             }
 
-            // 2. Obtener Datos Astronómicos (para imágenes o cálculos extra)
+            // 2. Obtener Datos Astronómicos y Luna
             $sunData = $this->astro->getSunData($region);
-
-            // 3. Obtener el mensaje inteligente de la Luna (Cordillera / Visibilidad)
             $moonMessage = $this->weather->getMoonMessage($region);
+
+            // 3. Lógica UV (Solo entre 10:00 y 18:00)
+            $uvMessage = "";
+            if ($horaInt >= 10 && $horaInt <= 18) {
+                $uvData = $this->uv->getUVData($region);
+                if ($uvData) {
+                    $uvMessage = "☀️ UV: {$uvData['valor']} {$uvData['emoji']} ({$uvData['riesgo']})\n";
+                }
+            }
 
             $text = "";
 
             if ($type === 'sunrise') {
                 $text = "🌅 ¡Buenos días, {$cityName}!\n";
-                $text .= "Temperatura actual a las {$horaActual}: {$temp}°C\n";
+                $text .= "Temperatura actual: {$temp}°C\n";
                 $text .= "Faltan 30 min para el amanecer ({$sunData['sunrise']}).\n";
                 $text .= "#Amanecer #Chile #{$cityName}";
 
             } elseif ($type === 'sunset') {
                 $text = "🌇 ¡Buenas tardes, {$cityName}!\n";
-                $text .= "Temperatura actual a las {$horaActual}: {$temp}°C\n";
+                $text .= "Temperatura actual: {$temp}°C\n";
                 $text .= "Faltan 30 min para el ocaso ({$sunData['sunset']}).\n";
-                $text .= "{$moonMessage}\n"; // Aquí inyectamos el mensaje inteligente
+                $text .= "{$moonMessage}\n";
                 $text .= "#Atardecer #Chile #{$cityName}";
 
             } else {
                 // TIPO: CLIMA (Reporte estándar)
-                $text = "🌡️ Temperatura en {$cityName} a las {$horaActual}: {$temp}°C\n\n";
-                $text .= "{$moonMessage}\n"; // Aquí inyectamos el mensaje inteligente
+                $text = "🌡️ Temperatura en {$cityName} a las {$horaActual}: {$temp}°C\n";
+
+                // Inyectamos el UV si estamos en el horario
+                if ($uvMessage) {
+                    $text .= $uvMessage;
+                }
+
+                $text .= "\n{$moonMessage}\n";
                 $text .= "#Chile #Clima #{$cityName}";
             }
 
@@ -85,7 +103,6 @@ class PostWeatherUpdate extends Command
                 $xService->sendTweet($text);
             } else {
                 $this->info("Generando imagen para evento especial...");
-                // Para la imagen seguimos pasando el array crudo por si el ImageService lo necesita
                 $moonDataRaw = $this->weather->getMoonData($region);
                 $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type);
                 $xService->sendTweet($text, $imagePath);
