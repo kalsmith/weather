@@ -17,7 +17,7 @@ class PostWeatherUpdate extends Command
      */
     protected $signature = 'weather:post {region=STGO} {--type=clima}';
 
-    protected $description = 'Obtiene clima, datos astronómicos y publica en X por región.';
+    protected $description = 'Obtiene clima, datos astronómicos y publica en X por región (con imagen solo en eventos especiales).';
 
     protected $weather;
     protected $image;
@@ -46,13 +46,14 @@ class PostWeatherUpdate extends Command
                 return 1;
             }
 
-            // 2. Obtener Datos Astronómicos (AstroService)
+            // 2. Obtener Datos Astronómicos
             $sunData = $this->astro->getSunData($region);
 
-            // 3. Obtener Datos Lunares (Desde tu nuevo main.py con fase_emoji y fase_nombre)
+            // 3. Obtener Datos Lunares
             $moonData = $this->weather->getMoonData($region);
 
             // 4. Personalizar el texto según el evento
+            $text = "";
             if ($type === 'sunrise') {
                 $text = "🌅 ¡Buenos días, {$region}!\n";
                 $text .= "Faltan 30 min para el amanecer ({$sunData['sunrise']}).\n";
@@ -74,6 +75,7 @@ class PostWeatherUpdate extends Command
                 $text .= "#Atardecer #Chile #{$region}";
 
             } else {
+                // TIPO: CLIMA (Solo Texto)
                 $text = "🌡️ Reporte Actualizado ({$region})\n";
                 $text .= "Temperatura: {$temp}°C\n";
 
@@ -84,19 +86,25 @@ class PostWeatherUpdate extends Command
                 $text .= "#Chile #Clima #{$region}";
             }
 
-            // 5. Generar la Imagen (Añadimos $type para que el Service elija el fondo nocturno si aplica)
-            $this->info("Generando imagen con estilo: {$type}...");
-            $imagePath = $this->image->generate($region, $temp, $moonData, $sunData, $type);
-
-            if (!file_exists($imagePath)) {
-                $this->error("Fallo al generar la imagen.");
-                return 1;
-            }
-
-            // 6. Publicar en X (Twitter)
-            $this->info("Publicando en X...");
+            // 5. Lógica de Publicación Dinámica
             $xService = new XService($region);
-            $xService->sendTweet($text, $imagePath);
+
+            if ($type === 'clima') {
+                // PUBLICAR SOLO TEXTO
+                $this->info("Publicando reporte de texto (sin imagen)...");
+                $xService->sendTweet($text); // Asegúrate que sendTweet acepte un solo parámetro
+            } else {
+                // GENERAR IMAGEN Y PUBLICAR (Sunrise / Sunset)
+                $this->info("Generando imagen con estilo: {$type}...");
+                $imagePath = $this->image->generate($region, $temp, $moonData, $sunData, $type);
+
+                if (!file_exists($imagePath)) {
+                    throw new \Exception("Fallo al generar la imagen en {$imagePath}");
+                }
+
+                $this->info("Publicando con media...");
+                $xService->sendTweet($text, $imagePath);
+            }
 
             $this->info("¡Éxito! Tweet publicado como {$type} en la cuenta de {$region}.");
 
