@@ -23,7 +23,6 @@ class XService
             'token_secret'    => env("TWITTER_ACCESS_SECRET_{$this->region}"),
         ];
 
-        // Si falta alguna llave, lanzamos un error claro antes de intentar el POST
         foreach ($this->config as $key => $value) {
             if (empty($value)) {
                 throw new \Exception("Falta la configuración {$key} para la región {$this->region} en el .env");
@@ -31,11 +30,21 @@ class XService
         }
     }
 
-    public function sendTweet(string $text, string $imagePath)
+    /**
+     * Envía un tweet con o sin imagen.
+     */
+    public function sendTweet(string $text, ?string $imagePath = null)
     {
         try {
-            // 1. Subir la imagen primero
-            $mediaId = $this->uploadMedia($imagePath);
+            $payload = ['text' => $text];
+
+            // 1. Si hay imagen, la subimos primero y la adjuntamos al payload
+            if ($imagePath && file_exists($imagePath)) {
+                $mediaId = $this->uploadMedia($imagePath);
+                $payload['media'] = [
+                    'media_ids' => [(string)$mediaId]
+                ];
+            }
 
             // 2. Configurar cliente Oauth1 para el Tweet v2
             $stack = HandlerStack::create();
@@ -49,12 +58,7 @@ class XService
             ]);
 
             $response = $client->post('tweets', [
-                'json' => [
-                    'text' => $text,
-                    'media' => [
-                        'media_ids' => [(string)$mediaId]
-                    ]
-                ]
+                'json' => $payload
             ]);
 
             return json_decode($response->getBody()->getContents(), true);
@@ -71,7 +75,6 @@ class XService
         $middleware = new Oauth1($this->config);
         $stack->push($middleware);
 
-        // El upload sigue siendo v1.1
         $client = new Client([
             'base_uri' => 'https://upload.twitter.com/1.1/',
             'handler'  => $stack,
