@@ -8,12 +8,17 @@ use Symfony\Component\DomCrawler\Crawler;
 
 class UVService
 {
+    /**
+     * Configuramos las URLs directas a los componentes (saltando el iframe)
+     */
     protected $config = [
         'STGO' => [
-            'url' => 'https://www.meteochile.gob.cl/PortalDMC-web/index.xhtml',
+            // URL del componente real de Santiago
+            'url' => 'https://www.meteochile.gob.cl/PortalDMC-web/pronostico_general.xhtml',
             'type' => 'table_class'
         ],
         'ANTOF' => [
+            // URL del componente real de radiación de regiones
             'url' => 'https://www.meteochile.gob.cl/PortalDMC-web/otros_pronosticos/radiacion_uv_region.xhtml?estacion=230001',
             'type' => 'id_based'
         ]
@@ -42,20 +47,21 @@ class UVService
                     $indice = trim($nodeIndice->text());
                     $riesgo = $crawler->filter('#riesgo')->count() > 0 ? trim($crawler->filter('#riesgo')->text()) : 'N/A';
                 } else {
-                    // Fallback: Buscar en la tabla de observación por celdas
+                    // Fallback para tablas de regiones (estilo obsTable)
                     $tabla = $crawler->filter('table#obsTable');
                     if ($tabla->count() > 0) {
                         $celdas = $tabla->filter('td');
-                        // En Antofagasta, el índice suele ser la 5ta celda (index 4)
+                        // El índice suele ser la 5ta celda y riesgo la 6ta
                         $indice = $celdas->count() >= 5 ? trim($celdas->at(4)->text()) : null;
                         $riesgo = $celdas->count() >= 6 ? trim($celdas->at(5)->text()) : 'N/A';
                     }
                 }
             } else {
-                // Lógica Santiago (Tabla por clases)
+                // Lógica Santiago (Tabla por clases en pronostico_general)
                 $tabla = $crawler->filter('table.tablaObservado')->first();
                 if ($tabla->count() > 0) {
                     $cells = $tabla->filter('td.tablaObservadoDatos');
+                    // En el componente de Santiago, la posición puede variar, aseguramos captura:
                     if ($cells->count() >= 3) {
                         $indice = trim($cells->at(1)->text());
                         $riesgo = trim($cells->at(2)->text());
@@ -63,7 +69,7 @@ class UVService
                 }
             }
 
-            // Limpieza final: Si el índice es "-", "s/i" o vacío, no sirve.
+            // Si el índice no es numérico o es el placeholder "-" de la DMC, abortamos
             if (empty($indice) || !is_numeric(substr($indice, 0, 1))) {
                 return null;
             }
@@ -84,10 +90,10 @@ class UVService
 
     private function getUVEmoji(int $indice): string
     {
-        if ($indice <= 2) return '🟢';
-        if ($indice <= 5) return '🟡';
-        if ($indice <= 7) return '🟠';
-        if ($indice <= 10) return '🔴';
-        return '🟣';
+        if ($indice <= 2) return '🟢'; // Bajo
+        if ($indice <= 5) return '🟡'; // Moderado
+        if ($indice <= 7) return '🟠'; // Alto
+        if ($indice <= 10) return '🔴'; // Muy Alto
+        return '🟣'; // Extremo
     }
 }
