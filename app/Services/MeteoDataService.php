@@ -47,7 +47,7 @@ class MeteoDataService
                     if (str_contains($rowText, 'Promedio 2 Min.')) {
                         $cells = (new Crawler($row))->filter('td');
                         if ($cells->count() >= 3) {
-                            $rawViento = trim($cells->at(2)->text());
+                            $rawViento = trim($cells->eq(2)->text());
                             // Usamos explode y end para sacar el número tras el "/"
                             $parts = explode('/', $rawViento);
                             $vientoKmh = trim(end($parts));
