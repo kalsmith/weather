@@ -17,7 +17,6 @@ class ImageService
         $backgroundName = $isNight ? "moon_{$region}.png" : "fondo_{$region}.png";
         $backgroundPath = public_path("assets/backgrounds/{$backgroundName}");
 
-        // Fallback por si no existe la imagen específica
         if (!file_exists($backgroundPath)) {
             $backgroundPath = public_path("assets/backgrounds/fondo_STGO.png");
         }
@@ -39,7 +38,7 @@ class ImageService
         $yellow = imagecolorallocate($canvas, 255, 215, 0);
         $boxColor = imagecolorallocatealpha($canvas, 255, 255, 255, 40);
 
-        // 4. Dibujar Parábola (Blanca si es noche, Amarilla si es día)
+        // 4. Dibujar Parábola
         $curveColor = $isNight ? $white : $yellow;
         $this->drawSolarCurve($canvas, $width, $height, $curveColor);
 
@@ -54,12 +53,25 @@ class ImageService
             imagestring($canvas, 5, $width - 200, 35, "LUNA: {$ilum}%", $black);
         }
 
-        // 7. Textos astronómicos abajo
+        // 7. Textos astronómicos dinámicos (LA MEJORA)
         $font = 4;
         $yPos = $height - 40;
-        imagestring($canvas, $font, 50, $yPos, "Amanecer: " . $sunData['sunrise'], $white);
-        imagestring($canvas, $font, ($width / 2) - 60, $yPos, "Cenit: " . $sunData['transit'], $white);
-        imagestring($canvas, $font, $width - 200, $yPos, "Ocaso: " . $sunData['sunset'], $white);
+
+        if ($type === 'sunrise') {
+            // Mañana: Planificación total
+            imagestring($canvas, $font, 50, $yPos, "Amanecer: " . $sunData['sunrise'], $white);
+            imagestring($canvas, $font, ($width / 2) - 60, $yPos, "Cenit: " . $sunData['transit'], $white);
+            imagestring($canvas, $font, $width - 200, $yPos, "Ocaso: " . $sunData['sunset'], $white);
+        } elseif ($type === 'sunset' || $isNight) {
+            // Noche/Ocaso: Solo información relevante
+            $fase = $moonData['fase_nombre'] ?? 'Luna';
+            imagestring($canvas, $font, 50, $yPos, "Fase: " . $fase, $white);
+            imagestring($canvas, $font, ($width / 2) - 60, $yPos, "Ocaso: " . $sunData['sunset'], $white);
+            imagestring($canvas, $font, $width - 200, $yPos, "Cielo Nocturno", $white);
+        } else {
+            // Reporte estándar
+            imagestring($canvas, $font, ($width / 2) - 60, $yPos, "Reporte Climatico", $white);
+        }
 
         // 8. Guardar y Retornar
         $fileName = "reporte_{$region}_" . time() . ".png";
