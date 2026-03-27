@@ -77,9 +77,9 @@ class PostWeatherUpdate extends Command
                 $text .= "#Chile #Clima #{$region}";
             }
 
-            // 5. Generar la Imagen
-            $this->info("Generando imagen...");
-            $imagePath = $this->image->generate($region, $temp, $moonData, $sunData);
+            // 5. Generar la Imagen (Añadimos $type para que el Service elija el fondo)
+            $this->info("Generando imagen con estilo: {$type}...");
+            $imagePath = $this->image->generate($region, $temp, $moonData, $sunData, $type);
 
             if (!file_exists($imagePath)) {
                 $this->error("Fallo al generar la imagen.");
@@ -87,6 +87,7 @@ class PostWeatherUpdate extends Command
             }
 
             // 6. Publicar en X (Twitter)
+            $this->info("Publicando en X...");
             $xService = new XService($region);
             $xService->sendTweet($text, $imagePath);
 
