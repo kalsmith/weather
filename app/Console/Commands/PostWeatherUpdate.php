@@ -5,73 +5,83 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use App\Services\WeatherService;
 use App\Services\ImageService;
+use App\Services\AstroService;
 use App\Services\XService;
 use Illuminate\Support\Facades\Log;
 
 class PostWeatherUpdate extends Command
 {
     /**
-     * El nombre y la firma del comando.
-     * Uso: php artisan weather:post {region}
+     * Firma actualizada para aceptar la opción --type
+     * Uso: php artisan weather:post STGO --type=sunrise
      */
-    protected $signature = 'weather:post {region=STGO}';
+    protected $signature = 'weather:post {region=STGO} {--type=clima}';
 
-    protected $description = 'Obtiene clima, datos de la luna y publica en X por región.';
+    protected $description = 'Obtiene clima, datos astronómicos y publica en X por región.';
 
     protected $weather;
     protected $image;
+    protected $astro;
 
-    public function __construct(WeatherService $weather, ImageService $image)
+    public function __construct(WeatherService $weather, ImageService $image, AstroService $astro)
     {
         parent::__construct();
         $this->weather = $weather;
         $this->image = $image;
+        $this->astro = $astro;
     }
 
     public function handle()
     {
         $region = strtoupper($this->argument('region'));
-        $this->info("Iniciando proceso para: {$region}...");
+        $type = $this->option('type'); // 'clima' o 'sunrise'
+
+        $this->info("Iniciando proceso para: {$region} (Tipo: {$type})...");
 
         try {
-            // 1. Obtener Temperatura (Scraping MeteoChile)
+            // 1. Obtener Temperatura
             $temp = $this->weather->getTemperature($region);
             if (!$temp) {
                 $this->error("No se pudo obtener la temperatura. Abortando.");
                 return 1;
             }
-            $this->info("Temperatura obtenida: {$temp}°C");
 
-            // 2. Obtener Datos Lunares (API Python Hosting)
+            // 2. Obtener Datos Astronómicos (AstroService)
+            $sunData = $this->astro->getSunData($region);
+
+            // 3. Obtener Datos Lunares (Python API)
             $moonData = $this->weather->getMoonData($region);
-            $this->info($moonData ? "Datos lunares listos." : "Sin datos lunares (continuando solo con clima).");
 
-            // 3. Generar la Imagen
+            // 4. Personalizar el texto según el tipo de post
+            if ($type === 'sunrise') {
+                $text = "🌅 ¡Buenos días, {$region}!\n";
+                $text .= "Faltan 30 min para el amanecer ({$sunData['sunrise']}).\n";
+                $text .= "Temp actual: {$temp}°C\n";
+                $text .= "#Amanecer #Chile #{$region}";
+            } else {
+                $text = "🌡️ Reporte Actualizado ({$region})\n";
+                $text .= "Temperatura: {$temp}°C\n";
+                if ($moonData) {
+                    $text .= "Luna: " . round($moonData['iluminacion_pct'] ?? 0) . "% iluminada.\n";
+                }
+                $text .= "#Chile #Clima #{$region}";
+            }
+
+            // 5. Generar la Imagen (Ahora pasamos sunData también)
             $this->info("Generando imagen...");
-            $imagePath = $this->image->generate($region, $temp, $moonData);
+            $imagePath = $this->image->generate($region, $temp, $moonData, $sunData);
 
             if (!file_exists($imagePath)) {
                 $this->error("Fallo al generar la imagen.");
                 return 1;
             }
 
-            // 4. Publicar en X (Twitter)
+            // 6. Publicar en X (Twitter)
             $this->info("Publicando en X...");
-            $xService = new XService($region); // Pasamos la región para cargar sus Keys
+            $xService = new XService($region);
+            $xService->sendTweet($text, $imagePath);
 
-            $text = "🌡️ Reporte Actualizado ({$region})\n";
-            $text .= "Temperatura: {$temp}°C\n";
-            if ($moonData) {
-                $text .= "Luna: " . round($moonData['iluminacion_pct'] ?? 0) . "% iluminada.\n";
-            }
-            $text .= "#Chile #Clima #{$region}";
-
-            $result = $xService->sendTweet($text, $imagePath);
-
-            // 5. Limpieza (Opcional: borrar imagen después de subir)
-            // unlink($imagePath);
-
-            $this->info("¡Éxito! Tweet publicado en la cuenta de {$region}.");
+            $this->info("¡Éxito! Tweet publicado como {$type} en la cuenta de {$region}.");
 
         } catch (\Exception $e) {
             $this->error("Error crítico: " . $e->getMessage());
