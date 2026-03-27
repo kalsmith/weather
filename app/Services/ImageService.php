@@ -4,66 +4,55 @@ namespace App\Services;
 
 class ImageService
 {
-    /**
-     * Genera la imagen del reporte meteorológico/astronómico.
-     */
-    public function generate(string $region, string $temp, ?array $moonData): string
+    public function generate(string $region, string $temp, ?array $moonData, array $sunData): string
     {
         $region = strtoupper($region);
-
-        // 1. Configuración de dimensiones y rutas
         $width = 800;
         $height = 600;
-        $backgroundPath = public_path("assets/backgrounds/fondo_{$region}.png");
 
+        $backgroundPath = public_path("assets/backgrounds/fondo_{$region}.png");
         if (!file_exists($backgroundPath)) {
-            // Fallback por si no encuentra el fondo específico
             $backgroundPath = public_path("assets/backgrounds/fondo_STGO.png");
         }
 
-        // 2. Crear Lienzo y Cargar Fondo
         $background = imagecreatefrompng($backgroundPath);
         $canvas = imagecreatetruecolor($width, $height);
 
-        // Preservar transparencia (Crucial para PNGs)
         imagesavealpha($canvas, true);
         $transparent = imagecolorallocatealpha($canvas, 0, 0, 0, 127);
         imagefill($canvas, 0, 0, $transparent);
 
-        // Redimensionar/Copiar fondo al lienzo
-        imagecopyresampled(
-            $canvas, $background,
-            0, 0, 0, 0,
-            $width, $height,
-            imagesx($background), imagesy($background)
-        );
+        imagecopyresampled($canvas, $background, 0, 0, 0, 0, $width, $height, imagesx($background), imagesy($background));
         imagedestroy($background);
 
-        // 3. Definir Colores
+        // Colores
         $white = imagecolorallocate($canvas, 255, 255, 255);
         $black = imagecolorallocate($canvas, 0, 0, 0);
         $yellow = imagecolorallocate($canvas, 255, 215, 0);
-        $boxColor = imagecolorallocatealpha($canvas, 255, 255, 255, 40); // Blanco semitransparente
+        $boxColor = imagecolorallocatealpha($canvas, 255, 255, 255, 40);
 
-        // 4. Dibujar Datos del Sol (Cálculo Nativo de PHP)
-        $coords = $this->getCoords($region);
-        $sunInfo = date_sun_info(time(), $coords['lat'], $coords['lon']);
+        // 1. Dibujar Parábola
+        $this->drawSolarCurve($canvas, $width, $height, $yellow);
 
-        $this->drawSolarCurve($canvas, $width, $height, $yellow, $sunInfo);
+        // 2. Cuadro Temperatura
+        imagefilledrectangle($canvas, 20, 20, 240, 70, $boxColor);
+        imagestring($canvas, 5, 40, 35, "TEMP: {$temp} C", $black);
 
-        // 5. Dibujar Cuadros de Texto e Info
-        // Cuadro Temperatura
-        imagefilledrectangle($canvas, 20, 20, 280, 80, $boxColor);
-        imagestring($canvas, 5, 40, 40, "Temp: {$temp} C", $black);
-
-        // Datos de la Luna (si existen)
+        // 3. Cuadro Luna
         if ($moonData) {
             $ilum = round($moonData['iluminacion_pct'] ?? 0, 1);
-            imagefilledrectangle($canvas, $width - 250, 20, $width - 20, 80, $boxColor);
-            imagestring($canvas, 5, $width - 230, 40, "Luna: {$ilum}%", $black);
+            imagefilledrectangle($canvas, $width - 220, 20, $width - 20, 70, $boxColor);
+            imagestring($canvas, 5, $width - 200, 35, "LUNA: {$ilum}%", $black);
         }
 
-        // 6. Guardar y Retornar Ruta
+        // 4. Pegar los 3 textos astronómicos abajo
+        $font = 4;
+        $yPos = $height - 40;
+        imagestring($canvas, $font, 50, $yPos, "Amanecer: " . $sunData['sunrise'], $white);
+        imagestring($canvas, $font, ($width / 2) - 60, $yPos, "Cenit: " . $sunData['transit'], $white);
+        imagestring($canvas, $font, $width - 200, $yPos, "Ocaso: " . $sunData['sunset'], $white);
+
+        // Guardar
         $fileName = "reporte_{$region}_" . time() . ".png";
         $savePath = storage_path("app/public/reports/{$fileName}");
 
@@ -77,7 +66,7 @@ class ImageService
         return $savePath;
     }
 
-    private function drawSolarCurve($canvas, $w, $h, $color, $sunInfo)
+    private function drawSolarCurve($canvas, $w, $h, $color)
     {
         $steps = 200;
         for ($i = 0; $i < $steps; $i++) {
@@ -87,14 +76,5 @@ class ImageService
             $y2 = $h - sin((($i + 1) / $steps) * M_PI) * $h * 0.4 - 100;
             imageline($canvas, $x1, $y1, $x2, $y2, $color);
         }
-    }
-
-    private function getCoords(string $region): array
-    {
-        $data = [
-            'STGO'  => ['lat' => -33.4489, 'lon' => -70.6693],
-            'ANTOF' => ['lat' => -23.65,   'lon' => -70.4],
-        ];
-        return $data[$region] ?? $data['STGO'];
     }
 }

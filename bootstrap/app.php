@@ -3,6 +3,8 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Console\Scheduling\Schedule; // Importante
+use App\Services\AstroService;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -15,4 +17,25 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
+    })
+    ->withSchedule(function (Schedule $schedule): void {
+
+        // 1. Reporte de clima cada 4 horas (Standard)
+        $schedule->command('weather:post STGO')->everyFourHours();
+        $schedule->command('weather:post ANTOF')->everyFourHours();
+
+        // 2. Reporte especial 30 min antes del amanecer (Santiago)
+        $schedule->command('weather:post STGO --type=sunrise')
+            ->everyMinute()
+            ->when(function () {
+                return (new AstroService())->isThirtyMinsBeforeSunrise('STGO');
+            });
+
+        // 3. Reporte especial 30 min antes del amanecer (Antofagasta)
+        $schedule->command('weather:post ANTOF --type=sunrise')
+            ->everyMinute()
+            ->when(function () {
+                return (new AstroService())->isThirtyMinsBeforeSunrise('ANTOF');
+            });
+
     })->create();
