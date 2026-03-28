@@ -7,15 +7,16 @@ class ImageService
     public function generate(string $region, string $temp, ?array $moonData, array $sunData, string $type = 'clima'): string
     {
         $region = strtoupper($region);
-        $width = 800; // Mantenemos cuadrado para X
+        $width = 800; // Mantenemos formato cuadrado para X
         $height = 800;
 
-        // 1. Lógica de fondo y estado
+        // 1. Lógica de fondo y estado (Prioridad absoluta al tipo de evento)
         if ($type === 'sunrise') {
-            $isNight = false;
+            $isNight = false; // Forza fondo claro
         } elseif ($type === 'sunset') {
-            $isNight = true;
+            $isNight = true;  // Forza fondo oscuro
         } else {
+            // Reporte estándar de clima
             $now = time();
             $isNight = ($now > $sunData['sunset_raw'] || $now < $sunData['sunrise_raw']);
         }
@@ -26,16 +27,18 @@ class ImageService
         // 2. Crear Lienzo
         $background = imagecreatefrompng($backgroundPath);
         $canvas = imagecreatetruecolor($width, $height);
+
+        // Cargar y redimensionar el fondo cuadrado (800x800)
         imagecopyresampled($canvas, $background, 0, 0, 0, 0, $width, $height, imagesx($background), imagesy($background));
         imagedestroy($background);
 
-        // 3. Colores y Píldora
+        // 3. Colores
         $white = imagecolorallocate($canvas, 255, 255, 255);
         $black = imagecolorallocate($canvas, 0, 0, 0);
         $yellow = imagecolorallocate($canvas, 255, 215, 0);
-        $gray = imagecolorallocate($canvas, 200, 200, 200); // Color para la curva de día
+        $gray = imagecolorallocate($canvas, 200, 200, 200); // Color sutil para la curva
 
-        // Píldora de fondo más sutil (alpha 50)
+        // Píldora de fondo más sutil y limpia (alpha 50)
         $pillBg = imagecolorallocatealpha($canvas, 255, 255, 255, 50);
 
         // 4. EL GRAFICADOR DE HORIZONTE FIJO (Trigonometría Nivel 2)
@@ -48,15 +51,15 @@ class ImageService
             $this->drawTextPill($canvas, "LUNA: {$ilum}%", $width - 180, 30, 5, $black, $pillBg);
         }
 
-        // 6. Textos Inferiores Protegidos (Legibilidad Total)
+        // 6. Textos Inferiores Protegidos con Píldora (Legibilidad Total)
         $yPos = $height - 80;
         if ($type === 'sunrise') {
-            // Mañana: Layout completo
+            // Layout de Mañana: Información completa del día
             $this->drawTextPill($canvas, "Amanecer: " . $sunData['sunrise'], 40, $yPos, 4, $black, $pillBg);
             $this->drawTextPill($canvas, "Cenit: " . $sunData['transit'], ($width / 2) - 60, $yPos, 4, $black, $pillBg);
             $this->drawTextPill($canvas, "Ocaso: " . $sunData['sunset'], $width - 200, $yPos, 4, $black, $pillBg);
         } else {
-            // Noche/Ocaso
+            // Layout Nocturno/Ocaso
             $fase = $moonData['fase_nombre'] ?? 'Luna';
             $this->drawTextPill($canvas, "Fase: " . $fase, 40, $yPos, 4, $black, $pillBg);
             $this->drawTextPill($canvas, "Ocaso: " . $sunData['sunset'], ($width / 2) - 60, $yPos, 4, $black, $pillBg);
@@ -75,19 +78,21 @@ class ImageService
     private function drawHorizonGraficador($canvas, $w, $h, $sunData, $whiteColor, $curveColor)
     {
         $steps = 200;
-        $baseline = $h * 0.75; // Línea fija del horizonte
-        $amplitude = $h * 0.35; // Altura del arco solar
+        $baseline = $h * 0.75; // Línea fija del horizonte (75% de la altura)
+        $amplitude = $h * 0.35; // Altura máxima del arco solar
 
         // A. Dibujar la línea del horizonte
         imagesetthickness($canvas, 2);
         imageline($canvas, 0, $baseline, $w, $baseline, $whiteColor);
 
-        // B. Dibujar la curva sinusoidal completa
+        // B. Dibujar el Arco Solar Completo (Curva Sinusoidal Gris)
+        // La curva representa la trayectoria completa del sol
         imagesetthickness($canvas, 3);
         for ($i = 0; $i < $steps; $i++) {
             $x1 = ($i / $steps) * $w;
             $x2 = (($i + 1) / $steps) * $w;
 
+            // Función seno para crear el arco
             $y1 = $baseline - sin(($i / $steps) * M_PI) * $amplitude;
             $y2 = $baseline - sin((($i + 1) / $steps) * M_PI) * $amplitude;
 
@@ -102,21 +107,21 @@ class ImageService
     private function drawSliderPoint($canvas, $w, $h, $sunData, $baseline, $amplitude, $color)
     {
         $now = time();
-        $start = $sunData['sunrise_raw'];
-        $end = $sunData['sunset_raw'];
+        $start = $sunData['sunrise_raw']; // Timestamp Amanecer
+        $end = $sunData['sunset_raw'];   // Timestamp Ocaso
 
-        // Progreso del día (0 a 1)
+        // Calcular el progreso del día (0 a 1)
         $dayDuration = $end - $start;
         $timeElapsed = $now - $start;
         $progress = $timeElapsed / $dayDuration;
 
-        // Limitar progreso entre 0 y 1 (para pruebas a cualquier hora)
+        // Limitar progreso entre 0 y 1 para que el punto no se escape
         $progress = max(0, min(1, $progress));
 
-        // Calcular posición X del punto
+        // Calcular posición X del punto blanco
         $pointX = $progress * $w;
 
-        // Calcular posición Y del punto (en base a la función seno)
+        // Calcular posición Y del punto blanco (basada en la curva)
         $pointY = $baseline - sin($progress * M_PI) * $amplitude;
 
         // Dibujar el Punto Blanco (un círculo relleno)
