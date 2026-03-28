@@ -7,8 +7,8 @@ class ImageService
     public function generate(string $region, string $temp, ?array $moonData, array $sunData, string $type = 'clima'): string
     {
         $region = strtoupper($region);
-        $width = 800;
-        $height = 800; // Formato cuadrado para mejor visibilidad en X
+        $width = 800; // Mantenemos cuadrado para X
+        $height = 800;
 
         // 1. Lógica de fondo y estado
         if ($type === 'sunrise') {
@@ -29,33 +29,38 @@ class ImageService
         imagecopyresampled($canvas, $background, 0, 0, 0, 0, $width, $height, imagesx($background), imagesy($background));
         imagedestroy($background);
 
-        // 3. Colores
+        // 3. Colores y Píldora
         $white = imagecolorallocate($canvas, 255, 255, 255);
         $black = imagecolorallocate($canvas, 0, 0, 0);
         $yellow = imagecolorallocate($canvas, 255, 215, 0);
-        $pillBg = imagecolorallocatealpha($canvas, 255, 255, 255, 45); // Fondo blanco suave
+        $gray = imagecolorallocate($canvas, 200, 200, 200); // Color para la curva de día
 
-        // 4. LA PARÁBOLA DINÁMICA (Trigonometría aplicada)
-        $this->drawSmartCurve($canvas, $width, $height, $isNight ? $white : $yellow, $isNight);
+        // Píldora de fondo más sutil (alpha 50)
+        $pillBg = imagecolorallocatealpha($canvas, 255, 255, 255, 50);
 
-        // 5. Cuadros Superiores con Píldora
+        // 4. EL GRAFICADOR DE HORIZONTE FIJO (Trigonometría Nivel 2)
+        $this->drawHorizonGraficador($canvas, $width, $height, $sunData, $white, $gray);
+
+        // 5. Cuadros Superiores con Píldora Limpia
         $this->drawTextPill($canvas, "TEMP: {$temp} C", 20, 30, 5, $black, $pillBg);
         if ($moonData) {
             $ilum = round($moonData['iluminacion_pct'] ?? 0, 1);
             $this->drawTextPill($canvas, "LUNA: {$ilum}%", $width - 180, 30, 5, $black, $pillBg);
         }
 
-        // 6. Textos Inferiores con Píldora (Legibilidad 100%)
+        // 6. Textos Inferiores Protegidos (Legibilidad Total)
         $yPos = $height - 80;
         if ($type === 'sunrise') {
+            // Mañana: Layout completo
             $this->drawTextPill($canvas, "Amanecer: " . $sunData['sunrise'], 40, $yPos, 4, $black, $pillBg);
-            $this->drawTextPill($canvas, "Cenit: " . $sunData['transit'], ($width/2)-60, $yPos, 4, $black, $pillBg);
-            $this->drawTextPill($canvas, "Ocaso: " . $sunData['sunset'], $width-200, $yPos, 4, $black, $pillBg);
+            $this->drawTextPill($canvas, "Cenit: " . $sunData['transit'], ($width / 2) - 60, $yPos, 4, $black, $pillBg);
+            $this->drawTextPill($canvas, "Ocaso: " . $sunData['sunset'], $width - 200, $yPos, 4, $black, $pillBg);
         } else {
+            // Noche/Ocaso
             $fase = $moonData['fase_nombre'] ?? 'Luna';
             $this->drawTextPill($canvas, "Fase: " . $fase, 40, $yPos, 4, $black, $pillBg);
-            $this->drawTextPill($canvas, "Ocaso: " . $sunData['sunset'], ($width/2)-60, $yPos, 4, $black, $pillBg);
-            $this->drawTextPill($canvas, "Cielo Nocturno", $width-200, $yPos, 4, $black, $pillBg);
+            $this->drawTextPill($canvas, "Ocaso: " . $sunData['sunset'], ($width / 2) - 60, $yPos, 4, $black, $pillBg);
+            $this->drawTextPill($canvas, "Cielo Nocturno", $width - 200, $yPos, 4, $black, $pillBg);
         }
 
         // 7. Guardar
@@ -67,36 +72,69 @@ class ImageService
         return $savePath;
     }
 
-    private function drawSmartCurve($canvas, $w, $h, $color, $isNight)
+    private function drawHorizonGraficador($canvas, $w, $h, $sunData, $whiteColor, $curveColor)
     {
         $steps = 200;
-        $baseline = $h * 0.75; // Línea del horizonte
+        $baseline = $h * 0.75; // Línea fija del horizonte
+        $amplitude = $h * 0.35; // Altura del arco solar
 
+        // A. Dibujar la línea del horizonte
+        imagesetthickness($canvas, 2);
+        imageline($canvas, 0, $baseline, $w, $baseline, $whiteColor);
+
+        // B. Dibujar la curva sinusoidal completa
+        imagesetthickness($canvas, 3);
         for ($i = 0; $i < $steps; $i++) {
             $x1 = ($i / $steps) * $w;
             $x2 = (($i + 1) / $steps) * $w;
 
-            if ($isNight) {
-                // Noche: Línea plana en el horizonte
-                imageline($canvas, $x1, $baseline, $x2, $baseline, $color);
-            } else {
-                // Día: Parábola de arco real usando Seno
-                $y1 = $baseline - sin(($i / $steps) * M_PI) * ($h * 0.35);
-                $y2 = $baseline - sin((($i + 1) / $steps) * M_PI) * ($h * 0.35);
-                imageline($canvas, $x1, $y1, $x2, $y2, $color);
-            }
+            $y1 = $baseline - sin(($i / $steps) * M_PI) * $amplitude;
+            $y2 = $baseline - sin((($i + 1) / $steps) * M_PI) * $amplitude;
+
+            // Usamos un color gris para que el punto blanco destaque
+            imageline($canvas, $x1, $y1, $x2, $y2, $curveColor);
         }
+
+        // C. Calcular y dibujar el "Punto Blanco" (Slider)
+        $this->drawSliderPoint($canvas, $w, $h, $sunData, $baseline, $amplitude, $whiteColor);
     }
 
+    private function drawSliderPoint($canvas, $w, $h, $sunData, $baseline, $amplitude, $color)
+    {
+        $now = time();
+        $start = $sunData['sunrise_raw'];
+        $end = $sunData['sunset_raw'];
+
+        // Progreso del día (0 a 1)
+        $dayDuration = $end - $start;
+        $timeElapsed = $now - $start;
+        $progress = $timeElapsed / $dayDuration;
+
+        // Limitar progreso entre 0 y 1 (para pruebas a cualquier hora)
+        $progress = max(0, min(1, $progress));
+
+        // Calcular posición X del punto
+        $pointX = $progress * $w;
+
+        // Calcular posición Y del punto (en base a la función seno)
+        $pointY = $baseline - sin($progress * M_PI) * $amplitude;
+
+        // Dibujar el Punto Blanco (un círculo relleno)
+        imagefilledellipse($canvas, $pointX, $pointY, 20, 20, $color);
+    }
+
+    /**
+     * Dibuja una píldora de texto con padding limpio.
+     */
     private function drawTextPill($canvas, $text, $x, $y, $font, $textColor, $bgColor)
     {
         $fw = imagefontwidth($font);
         $fh = imagefontheight($font);
         $tw = strlen($text) * $fw;
 
-        // Dibujar el fondo de la píldora
-        imagefilledrectangle($canvas, $x-10, $y-10, $x+$tw+10, $y+$fh+10, $bgColor);
-        // Dibujar el texto
+        // Píldora limpia
+        imagefilledrectangle($canvas, $x - 10, $y - 10, $x + $tw + 10, $y + $fh + 10, $bgColor);
+
         imagestring($canvas, $font, $x, $y, $text, $textColor);
     }
 }
