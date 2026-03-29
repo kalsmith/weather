@@ -7,7 +7,6 @@ use Symfony\Component\DomCrawler\Crawler;
 
 class MeteoDataService
 {
-    // Cambiamos el nombre del parámetro de $url a $region para que sea claro
     protected $urls = [
         'STGO'  => 'https://climatologia.meteochile.gob.cl/application/diariob/visorDeDatosEma/330020',
         'ANTOF' => 'https://climatologia.meteochile.gob.cl/application/diariob/visorDeDatosEma/230002',
@@ -16,7 +15,6 @@ class MeteoDataService
     public function getStationDetails(string $region): array
     {
         try {
-            // 1. Obtener la URL real usando la región
             $url = $this->urls[$region] ?? null;
 
             if (!$url) {
@@ -31,13 +29,16 @@ class MeteoDataService
 
             $crawler = new Crawler($response->body());
 
-            // 2. Humedad: .text-humedad
-            $humedad = $crawler->filter('.text-humedad')->count() > 0
+            // 1. Humedad: Limpiamos también posibles ceros si fuera necesario
+            $humedadRaw = $crawler->filter('.text-humedad')->count() > 0
                 ? trim($crawler->filter('.text-humedad')->text())
                 : null;
 
-            // 3. Viento
-            $vientoKmh = null;
+            // Convertimos a int para quitar ceros a la izquierda (ej: "08%" -> "8")
+            $humedad = is_numeric($humedadRaw) ? (int)$humedadRaw : $humedadRaw;
+
+            // 2. Viento
+            $vientoFinal = null;
             $vientoTable = $crawler->filter('table');
 
             foreach ($vientoTable as $table) {
@@ -48,9 +49,19 @@ class MeteoDataService
                         $cells = (new Crawler($row))->filter('td');
                         if ($cells->count() >= 3) {
                             $rawViento = trim($cells->eq(2)->text());
-                            // Usamos explode y end para sacar el número tras el "/"
+
+                            // Extraemos lo que hay después del "/"
                             $parts = explode('/', $rawViento);
-                            $vientoKmh = trim(end($parts));
+                            $vientoValue = trim(end($parts));
+
+                            // Lógica de limpieza:
+                            // Si es numérico (ej: "05"), lo convertimos a int para que sea "5"
+                            // Si es "Calma", se mantiene como string
+                            if (is_numeric($vientoValue)) {
+                                $vientoFinal = (int)$vientoValue;
+                            } else {
+                                $vientoFinal = $vientoValue;
+                            }
                         }
                     }
                 }
@@ -58,7 +69,7 @@ class MeteoDataService
 
             return [
                 'humedad' => $humedad,
-                'viento'  => $vientoKmh,
+                'viento'  => $vientoFinal,
                 'status'  => 'ok'
             ];
 
