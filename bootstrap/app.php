@@ -22,35 +22,47 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $astro = new AstroService();
 
-        // 1. Reportes de clima estándar cada 4 horas
+        // --- 1. REPORTES DE CLIMA ESTÁNDAR (Cada 4 horas) ---
         $schedule->command('weather:post STGO')->everyFourHours();
         $schedule->command('weather:post ANTOF')->everyFourHours();
 
-        // ==============================
+        // ==========================================
         // SANTIAGO (STGO)
-        // ==============================
+        // ==========================================
 
-        // Reporte 30 min antes del Amanecer
+        // 30 min antes del Amanecer
         $schedule->command('weather:post STGO --type=sunrise')
             ->everyMinute()
             ->when(fn() => $astro->isThirtyMinsBeforeSunrise('STGO'));
 
-        // Reporte 30 min antes del Ocaso
+        // Cenit Solar Exacto (Punto más alto del arco)
+        $sunStgo = $astro->getSunData('STGO');
+        $schedule->command('weather:post STGO --type=cenit')
+            ->at(date('H:i', $sunStgo['transit_raw']))
+            ->timezone('America/Santiago');
+
+        // 30 min antes del Ocaso
         $schedule->command('weather:post STGO --type=sunset')
             ->everyMinute()
             ->when(fn() => $astro->isThirtyMinsBeforeSunset('STGO'));
 
 
-        // ==============================
+        // ==========================================
         // ANTOFAGASTA (ANTOF)
-        // ==============================
+        // ==========================================
 
-        // Reporte 30 min antes del Amanecer
+        // 30 min antes del Amanecer
         $schedule->command('weather:post ANTOF --type=sunrise')
             ->everyMinute()
             ->when(fn() => $astro->isThirtyMinsBeforeSunrise('ANTOF'));
 
-        // Reporte 30 min antes del Ocaso
+        // Cenit Solar Exacto (Punto más alto del arco)
+        $sunAntof = $astro->getSunData('ANTOF');
+        $schedule->command('weather:post ANTOF --type=cenit')
+            ->at(date('H:i', $sunAntof['transit_raw']))
+            ->timezone('America/Santiago');
+
+        // 30 min antes del Ocaso
         $schedule->command('weather:post ANTOF --type=sunset')
             ->everyMinute()
             ->when(fn() => $astro->isThirtyMinsBeforeSunset('ANTOF'));

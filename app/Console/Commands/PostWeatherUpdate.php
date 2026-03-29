@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Services\WeatherService;
-use App\Services\MeteoDataService; // El nuevo servicio
+use App\Services\MeteoDataService;
 use App\Services\ImageService;
 use App\Services\AstroService;
 use App\Services\XService;
@@ -14,10 +14,10 @@ use Carbon\Carbon;
 class PostWeatherUpdate extends Command
 {
     protected $signature = 'weather:post {region=STGO} {--type=clima}';
-    protected $description = 'Publica el clima, viento y humedad con un toque local.';
+    protected $description = 'Publica el clima y eventos astronómicos con gráficos de 24h solo en hitos.';
 
     protected $weather;
-    protected $meteo; // Nuevo
+    protected $meteo;
     protected $image;
     protected $astro;
 
@@ -39,11 +39,9 @@ class PostWeatherUpdate extends Command
         $region = strtoupper($this->argument('region'));
         $type = $this->option('type');
 
-        // Configuración de ciudades y zonas horarias
         $config = [
             'STGO'  => ['name' => 'Santiago', 'tz' => 'America/Santiago'],
             'ANTOF' => ['name' => 'Antofagasta', 'tz' => 'America/Santiago'],
-            // 'PUQ'   => ['name' => 'Punta Arenas', 'tz' => 'America/Punta_Arenas'],
         ];
 
         $cityName = $config[$region]['name'] ?? $region;
@@ -52,65 +50,73 @@ class PostWeatherUpdate extends Command
         $now = Carbon::now($timezone);
         $horaActual = $now->format('H:i');
 
-        $this->info("Iniciando proceso para: {$cityName} a las {$horaActual} ({$timezone})...");
-
         try {
-            // 1. Obtener Temperatura Principal
+            // 1. Datos base
             $temp = $this->weather->getTemperature($region);
-            if (!$temp) {
-                throw new \Exception("No se obtuvo temperatura para {$region}");
-            }
+            if (!$temp) throw new \Exception("No se obtuvo temperatura para {$region}");
 
-            // 2. Obtener Extras (Viento y Humedad) desde el nuevo servicio
-            // Usamos la URL que ya tienes mapeada en el WeatherService para esa región
             $extras = $this->meteo->getStationDetails($region);
-
-            // 3. Obtener Datos Astronómicos y Luna
             $sunData = $this->astro->getSunData($region);
             $moonMessage = $this->weather->getMoonMessage($region);
+            $moonDataRaw = $this->weather->getMoonData($region);
 
             $text = "";
+            $imagePath = null; // Por defecto no hay imagen
 
-            if ($type === 'sunrise') {
-                $text = "🌅 ¡Buenos días, {$cityName}!\n";
-                $text .= "Temperatura actual: {$temp}°C\n";
-                $text .= "Faltan 30 min para el amanecer ({$sunData['sunrise']}).\n";
-                $text .= "#Amanecer #Chile #{$cityName}";
+            // 2. Lógica de Mensaje y Decisión de Imagen
+            switch ($type) {
+                case 'sunrise':
+                    $text = "🌅 ¡Buenos días, {$cityName}!\n";
+                    $text .= "Temperatura: {$temp}°C\n";
+                    $text .= "Faltan 30 min para el amanecer ({$sunData['sunrise']}).\n";
+                    $text .= "#Amanecer #Chile #{$cityName}";
+                    // Generar imagen para el hito
+                    $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type);
+                    break;
 
-            } elseif ($type === 'sunset') {
-                $text = "🌇 ¡Buenas tardes, {$cityName}!\n";
-                $text .= "Temperatura actual: {$temp}°C\n";
-                $text .= "Faltan 30 min para el ocaso ({$sunData['sunset']}).\n";
-                $text .= "{$moonMessage}\n";
-                $text .= "#Atardecer #Chile #{$cityName}";
+                case 'cenit':
+                    $text = "☀️ ¡Cenit en {$cityName}!\n";
+                    $text .= "El sol está en su punto máximo ({$sunData['transit']}).\n";
+                    $text .= "Temperatura actual: {$temp}°C\n";
+                    $text .= "#Cenit #Astronomía #{$cityName}";
+                    // Generar imagen para el hito
+                    $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type);
+                    break;
 
-            } else {
-                // TIPO: CLIMA (Reporte estándar enriquecido)
-                $text = "🌡️ Temperatura en {$cityName} a las {$horaActual}: {$temp}°C\n";
+                case 'sunset':
+                    $text = "🌇 ¡Buenas tardes, {$cityName}!\n";
+                    $text .= "Temperatura: {$temp}°C\n";
+                    $text .= "Faltan 30 min para el ocaso ({$sunData['sunset']}).\n";
+                    $text .= "{$moonMessage}\n";
+                    $text .= "#Atardecer #Chile #{$cityName}";
+                    // Generar imagen para el hito
+                    $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type);
+                    break;
 
-                // Inyectamos Humedad y Viento si existen
-                if (!empty($extras['humedad']) || !empty($extras['viento'])) {
-                    $lineaExtras = "";
-                    if ($extras['humedad']) $lineaExtras .= "💧 Humedad: {$extras['humedad']}% ";
-                    if ($extras['viento'])  $lineaExtras .= "🌬️ Viento: {$extras['viento']} km/h";
-                    $text .= trim($lineaExtras) . "\n";
-                }
+                default: // CLIMA ESTÁNDAR (Cada 4 horas)
+                    $text = "🌡️ Reporte de Clima: {$cityName}\n";
+                    $text .= "Hora: {$horaActual} | Temp: {$temp}°C\n";
 
-                $text .= "{$moonMessage}\n";
-                $text .= "#Chile #Clima #{$cityName}";
+                    if (!empty($extras['humedad']) || !empty($extras['viento'])) {
+                        if ($extras['humedad']) $text .= "💧 Humedad: {$extras['humedad']}% ";
+                        if ($extras['viento'])  $text .= "🌬️ Viento: {$extras['viento']} km/h";
+                        $text .= "\n";
+                    }
+                    $text .= "{$moonMessage}\n";
+                    $text .= "#Chile #Clima #{$cityName}";
+                    // NO se genera imagen aquí
+                    break;
             }
 
-            // 4. Envío a X (Twitter)
+            // 3. Envío a X (Twitter)
             $xService = new XService($region);
 
-            if ($type === 'clima') {
-                $this->info("Enviando reporte de texto con extras...");
-                $xService->sendTweet($text);
-            } else {
-                $this->info("Generando imagen para evento especial...");
-                $moonDataRaw = $this->weather->getMoonData($region);
-                $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type);
+            if ($imagePath) {
+                $this->info("Enviando tweet con imagen para evento: {$type}");
                 $xService->sendTweet($text, $imagePath);
+            } else {
+                $this->info("Enviando tweet de solo texto para reporte estándar");
+                $xService->sendTweet($text);
             }
 
             $this->info("¡Éxito! Publicado en cuenta de {$cityName}.");

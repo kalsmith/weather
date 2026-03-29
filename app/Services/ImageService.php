@@ -103,28 +103,27 @@ class ImageService
         $this->drawSliderPoint($canvas, $w, $h, $sunData, $baseline, $amplitude, $startOfDay, $totalSeconds, $whiteColor);
     }
 
-    private function drawSliderPoint($canvas, $w, $h, $sunData, $baseline, $amplitude, $startOfDay, $totalSeconds, $color)
+    // Dentro de drawSliderPoint en ImageService.php
+    private function drawSliderPoint($canvas, $w, $h, $sunData, $baseline, $amplitude, $startOfDay, $totalSeconds, $color, $type = 'clima')
     {
-        $now = time();
+        // Si es tipo cenit, forzamos el timestamp al tránsito solar exacto
+        $now = ($type === 'cenit') ? $sunData['transit_raw'] : time();
 
-        // Posición X basada en las 24 horas
         $progressDay = ($now - $startOfDay) / $totalSeconds;
         $pointX = $progressDay * $w;
 
-        // Posición Y dinámica
         if ($now >= $sunData['sunrise_raw'] && $now <= $sunData['sunset_raw']) {
-            // Si es de día, sigue la curva
             $dayDuration = $sunData['sunset_raw'] - $sunData['sunrise_raw'];
             $timeInDay = $now - $sunData['sunrise_raw'];
             $progressSun = $timeInDay / $dayDuration;
             $pointY = $baseline - sin($progressSun * M_PI) * $amplitude;
         } else {
-            // Si es de noche, se queda en el horizonte
             $pointY = $baseline;
         }
 
         imagefilledellipse($canvas, (int)$pointX, (int)$pointY, 20, 20, $color);
     }
+
 
     private function drawTextPill($canvas, $text, $x, $y, $font, $textColor, $bgColor)
     {
