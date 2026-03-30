@@ -79,14 +79,33 @@ class PostWeatherUpdate extends Command
 
             // 2. Lógica de Mensajes y Generación de Imágenes
             switch ($type) {
+// ... dentro del switch ($type) en handle() ...
+
                 case 'sunrise':
                     $text = "🌅 ¡Buenos días, {$cityName}!\n";
-                    $text .= "Temp. actual: {$temp}°C\n";
-                    if (isset($extras['minima_12h'])) {
-                        $text .= "Mínima hoy: {$extras['minima_12h']}°C\n";
+                    $text .= "🌡️ Temp. actual: {$temp}°C\n";
+
+                    // 1. Intentamos obtener la máxima proyectada desde el nuevo servicio de riesgo
+                    $datosRiesgo = $this->meteo->getFireRiskData($region); // Asumiendo que implementas este método
+                    $maximaHoy = $datosRiesgo['temperaturaMaximaHoy'] ?? null;
+                    $vientoProyectado = $datosRiesgo['intensidadVientoMaximoHoy'] ?? null;
+
+                    if ($maximaHoy) {
+                        $text .= "🔺 Máxima esperada: {$maximaHoy}°C\n";
+                    } elseif (isset($extras['maxima_12h'])) {
+                        // Fallback al dato histórico si no hay proyectado
+                        $text .= "🔺 Máxima reciente: {$extras['maxima_12h']}°C\n";
                     }
-                    $text .= "Amanecer a las {$sunData['sunrise']}.\n";
-                    $text .= "#Amanecer #Chile #{$cityName}";
+
+                    if ($vientoProyectado && $vientoProyectado > 30) {
+                        $text .= "🌬️ Ojo: Ráfagas de hasta {$vientoProyectado} km/h\n";
+                    }
+
+                    $text .= "☀️ Amanecer: {$sunData['sunrise']} hrs\n\n";
+                    $text .= "¡Que tengan un excelente día! ☕\n";
+                    $text .= "#Amanecer #Chile #{$cityName} #Clima";
+
+                    // Generar la imagen del amanecer (la que ya tenías)
                     $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type);
                     break;
 

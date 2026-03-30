@@ -62,6 +62,56 @@ class MeteoDataService
     }
 
     /**
+     * Obtiene datos de pronóstico (máximas, mínimas y ráfagas) desde el servicio de Riesgo de Incendio.
+     */
+    public function getFireRiskData(string $region): ?array
+    {
+        $region = strtoupper($region);
+        $codigoBuscado = $this->estaciones[$region] ?? null;
+
+        if (!$codigoBuscado) return null;
+
+        try {
+            $urlRiesgo = 'https://climatologia.meteochile.gob.cl/application/geoservicios/getRiesgoIncendio';
+
+            $response = Http::timeout(15)->get($urlRiesgo, [
+                'usuario' => $this->usuario,
+                'token'   => $this->token,
+            ]);
+
+            if ($response->failed()) return null;
+
+            $data = $response->json();
+
+            // Buscamos la estación por su Código Nacional dentro de las "features"
+            $feature = collect($data['features'])->first(function ($f) use ($codigoBuscado) {
+                return (string) ($f['properties']['CodigoNacional'] ?? '') === (string) $codigoBuscado;
+            });
+
+            if (!$feature) {
+                Log::warning("MeteoDataService (Riesgo): No se encontró la estación {$codigoBuscado} en el mapa de riesgos.");
+                return null;
+            }
+
+            $p = $feature['properties'];
+
+            return [
+                'temperaturaMaximaHoy'     => $this->cleanValue($p['temperaturaMaximaHoy'] ?? null),
+                'temperaturaMaximaManana'  => $this->cleanValue($p['temperaturaMaximaManana'] ?? null),
+                'humedadMinimaHoy'         => $this->cleanValue($p['humedadMinimaHoy'] ?? null),
+                'intensidadVientoMaximoHoy'=> $this->cleanValue($p['intensidadVientoMaximoHoy'] ?? null),
+                'momento'                  => $p['momento'] ?? null,
+            ];
+
+        } catch (\Exception $e) {
+            Log::error("MeteoDataService Riesgo Error ({$region}): " . $e->getMessage());
+            return null;
+        }
+    }
+
+
+
+    /**
      * Limpia el string de la DMC para convertirlo en un número válido.
      * Ejemplo: "27.6 °C" -> 27.6 | "27 %" -> 27 | "954.1 hPas." -> 954.1
      */
