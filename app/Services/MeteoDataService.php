@@ -3,78 +3,62 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
-use Symfony\Component\DomCrawler\Crawler;
+use Illuminate\Support\Facades\Log;
 
 class MeteoDataService
 {
-    protected $urls = [
-        'STGO'  => 'https://climatologia.meteochile.gob.cl/application/diariob/visorDeDatosEma/330020',
-        'ANTOF' => 'https://climatologia.meteochile.gob.cl/application/diariob/visorDeDatosEma/230002',
+    protected $baseUrl = 'https://climatologia.meteochile.gob.cl/application/servicios/getRecienteRecienteEstacion';
+    protected $usuario = 'celabarcassi@gmail.com';
+    protected $token   = '3432820e92bb80947ae7943f';
+
+    protected $estaciones = [
+        'STGO'  => '330020', // Quinta Normal
+        'ANTOF' => '230002', // Cerro Moreno
     ];
 
-    public function getStationDetails(string $region): array
+    public function getStationDetails(string $region): ?array
     {
+        $region = strtoupper($region);
+        $codigo = $this->estaciones[$region] ?? null;
+
+        if (!$codigo) return null;
+
         try {
-            $url = $this->urls[$region] ?? null;
+            $response = Http::timeout(15)->get($this->baseUrl, [
+                'usuario' => $this->usuario,
+                'token'   => $this->token,
+                'codigo'  => $codigo
+            ]);
 
-            if (!$url) {
-                return ['status' => 'error', 'message' => "Región {$region} no mapeada"];
-            }
+            if ($response->failed()) return null;
 
-            $response = Http::withHeaders([
-                'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            ])->timeout(10)->get($url);
+            $data = $response->json();
 
-            if ($response->failed()) return [];
+            // Tomamos el registro más reciente (índice 0)
+            $actual = $data['datosEstaciones']['datos'][0] ?? null;
 
-            $crawler = new Crawler($response->body());
-
-            // 1. Humedad: Limpiamos también posibles ceros si fuera necesario
-            $humedadRaw = $crawler->filter('.text-humedad')->count() > 0
-                ? trim($crawler->filter('.text-humedad')->text())
-                : null;
-
-            // Convertimos a int para quitar ceros a la izquierda (ej: "08%" -> "8")
-            $humedad = is_numeric($humedadRaw) ? (int)$humedadRaw : $humedadRaw;
-
-            // 2. Viento
-            $vientoFinal = null;
-            $vientoTable = $crawler->filter('table');
-
-            foreach ($vientoTable as $table) {
-                $rows = (new Crawler($table))->filter('tr');
-                foreach ($rows as $row) {
-                    $rowText = $row->nodeValue;
-                    if (str_contains($rowText, 'Promedio 2 Min.')) {
-                        $cells = (new Crawler($row))->filter('td');
-                        if ($cells->count() >= 3) {
-                            $rawViento = trim($cells->eq(2)->text());
-
-                            // Extraemos lo que hay después del "/"
-                            $parts = explode('/', $rawViento);
-                            $vientoValue = trim(end($parts));
-
-                            // Lógica de limpieza:
-                            // Si es numérico (ej: "05"), lo convertimos a int para que sea "5"
-                            // Si es "Calma", se mantiene como string
-                            if (is_numeric($vientoValue)) {
-                                $vientoFinal = (int)$vientoValue;
-                            } else {
-                                $vientoFinal = $vientoValue;
-                            }
-                        }
-                    }
-                }
-            }
+            if (!$actual) return null;
 
             return [
-                'humedad' => $humedad,
-                'viento'  => $vientoFinal,
-                'status'  => 'ok'
+                'temperatura' => (float)$actual['temperatura'],
+                'humedad'     => (int)$actual['humedadRelativa'],
+                'viento'      => $this->knotsToKmh($actual['fuerzaDelVientoPromedio10Minutos']),
+                'presion'     => (float)$actual['presionEstacion'],
+                'maxima_12h'  => (float)$actual['temperaturaMaxima12Horas'],
+                'minima_12h'  => (float)$actual['temperaturaMinima12Horas'],
+                'radiacion'   => (float)$actual['radiacionGlobalInst'], // Watt/m2
+                'momento'     => $actual['momento'],
             ];
 
         } catch (\Exception $e) {
-            return ['status' => 'error', 'message' => $e->getMessage()];
+            Log::error("MeteoDataService Error ({$region}): " . $e->getMessage());
+            return null;
         }
+    }
+
+    private function knotsToKmh($knots): float
+    {
+        // La DMC entrega el viento en nudos (kt). 1 kt = 1.852 km/h
+        return round((float)$knots * 1.852, 1);
     }
 }

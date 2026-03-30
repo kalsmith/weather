@@ -8,27 +8,27 @@ use App\Services\MeteoDataService;
 use App\Services\ImageService;
 use App\Services\AstroService;
 use App\Services\XService;
-use App\Services\UVService; // Nuevo
+use App\Services\UVService;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 
 class PostWeatherUpdate extends Command
 {
     protected $signature = 'weather:post {region=STGO} {--type=clima}';
-    protected $description = 'Publica clima, astronomía y reportes UV con imágenes en hitos.';
+    protected $description = 'Publica clima, astronomía y reportes UV usando la API oficial de la DMC.';
 
     protected $weather;
     protected $meteo;
     protected $image;
     protected $astro;
-    protected $uv; // Nuevo
+    protected $uv;
 
     public function __construct(
         WeatherService $weather,
         MeteoDataService $meteo,
         ImageService $image,
         AstroService $astro,
-        UVService $uv // Inyectamos
+        UVService $uv
     ) {
         parent::__construct();
         $this->weather = $weather;
@@ -55,26 +55,34 @@ class PostWeatherUpdate extends Command
         $horaActual = $now->format('H:i');
 
         try {
-            // 1. Datos base
-            $temp = $this->weather->getTemperature($region);
-            if (!$temp) throw new \Exception("No se obtuvo temperatura para {$region}");
-
+            // 1. Obtener datos de la estación (API DMC 12 Horas)
+            // Esta es ahora nuestra fuente primaria para Temp, Humedad, Viento y Presión
             $extras = $this->meteo->getStationDetails($region);
+
+            // Fallback: Si la DMC falla, intentamos WeatherService (OpenWeather/Scraping)
+            $temp = $extras ? $extras['temperatura'] : $this->weather->getTemperature($region);
+
+            if (!$temp) {
+                throw new \Exception("No se pudo obtener la temperatura ni de la DMC ni del fallback para {$region}");
+            }
+
+            // 2. Datos complementarios
             $sunData = $this->astro->getSunData($region);
             $moonMessage = $this->weather->getMoonMessage($region);
             $moonDataRaw = $this->weather->getMoonData($region);
-
-            // 2. Obtener datos UV (Siempre lo intentamos por si el reporte estándar lo necesita)
             $uvData = $this->uv->getUVData($region);
 
             $text = "";
             $imagePath = null;
 
-            // 3. Lógica de Mensaje y Decisión de Imagen
+            // 3. Lógica de Mensajes por hito
             switch ($type) {
                 case 'sunrise':
                     $text = "🌅 ¡Buenos días, {$cityName}!\n";
-                    $text .= "Temperatura: {$temp}°C\n";
+                    $text .= "Temp. actual: {$temp}°C\n";
+                    if (isset($extras['minima_12h'])) {
+                        $text .= "Mínima hoy: {$extras['minima_12h']}°C\n";
+                    }
                     $text .= "Faltan 30 min para el amanecer ({$sunData['sunrise']}).\n";
                     $text .= "#Amanecer #Chile #{$cityName}";
                     $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type);
@@ -89,34 +97,39 @@ class PostWeatherUpdate extends Command
                         $text .= "¡Usa protección solar! 🧴🕶️\n";
                     }
 
-                    $text .= "Temperatura: {$temp}°C\n";
-                    $text .= "#Cenit #Astronomía #RadiacionUV #{$cityName}";
+                    if (isset($extras['maxima_12h'])) {
+                        $text .= "Máxima hasta ahora: {$extras['maxima_12h']}°C\n";
+                    }
 
-                    // Aquí podrías usar un generador específico para UV o el general
-                    // Por ahora usamos el general que ya conoce el evento 'cenit'
+                    $text .= "Temp. actual: {$temp}°C\n";
+                    $text .= "#Cenit #Astronomía #RadiacionUV #{$cityName}";
                     $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type, $uvData);
                     break;
 
                 case 'sunset':
                     $text = "🌇 ¡Buenas tardes, {$cityName}!\n";
-                    $text .= "Temperatura: {$temp}°C\n";
+                    $text .= "Temp. actual: {$temp}°C\n";
+                    if (isset($extras['maxima_12h'])) {
+                        $text .= "Máxima del día: {$extras['maxima_12h']}°C\n";
+                    }
                     $text .= "Faltan 30 min para el ocaso ({$sunData['sunset']}).\n";
                     $text .= "{$moonMessage}\n";
                     $text .= "#Atardecer #Chile #{$cityName}";
                     $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type);
                     break;
 
-                default: // CLIMA ESTÁNDAR (Cada 4 horas)
+                default: // CLIMA ESTÁNDAR
                     $text = "🌡️ Reporte de Clima: {$cityName}\n";
                     $text .= "Hora: {$horaActual} | Temp: {$temp}°C\n";
 
-                    if (!empty($extras['humedad']) || !empty($extras['viento'])) {
+                    if ($extras) {
                         if ($extras['humedad']) $text .= "💧 Humedad: {$extras['humedad']}% ";
-                        if ($extras['viento'])  $text .= "🌬️ Viento: {$extras['viento']} km/h";
-                        $text .= "\n";
+                        if ($extras['viento'])  $text .= "🌬️ Viento: {$extras['viento']} km/h\n";
+                        if (isset($extras['presion'])) {
+                            $text .= "⏲️ Presión: {$extras['presion']} hPa\n";
+                        }
                     }
 
-                    // Añadimos UV al reporte estándar si hay datos
                     if ($uvData && $uvData['valor'] > 0) {
                         $text .= "☀️ UV: {$uvData['valor']} ({$uvData['riesgo']}) {$uvData['emoji']}\n";
                     }
@@ -133,7 +146,7 @@ class PostWeatherUpdate extends Command
                 $this->info("Enviando tweet con imagen para evento: {$type}");
                 $xService->sendTweet($text, $imagePath);
             } else {
-                $this->info("Enviando tweet de solo texto para reporte estándar");
+                $this->info("Enviando tweet de solo texto");
                 $xService->sendTweet($text);
             }
 
