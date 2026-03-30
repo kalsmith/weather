@@ -41,7 +41,7 @@ class UVService
             $data = $response->json();
             $codigoBuscado = (string) $this->config[$region]['codigo'];
 
-            // Buscamos la estación comparando como string para mayor seguridad
+            // Buscamos la estación en el reporte general
             $estacionData = collect($data['datosRecientes'] ?? [])
                 ->first(function ($item) use ($codigoBuscado) {
                     return isset($item['estacion']['codigoNacional']) &&
@@ -53,17 +53,21 @@ class UVService
                 return null;
             }
 
-            // Obtenemos la última lectura del array
-            $ultimaLectura = collect($estacionData['indiceUV'])->last();
+            // IMPORTANTE: Obtenemos TODO el historial para el gráfico
+            $historico = $estacionData['indiceUV'];
 
-            // Si el índice no viene, asumimos 0 (noche o sensor inactivo)
+            // Obtenemos la última lectura para los datos de texto
+            $ultimaLectura = collect($historico)->last();
+
+            // Si el índice no viene, asumimos 0
             $valorNumerico = isset($ultimaLectura['indiceUV']) ? (int)$ultimaLectura['indiceUV'] : 0;
 
             return [
-                'valor'  => $valorNumerico,
-                'riesgo' => $this->getUVLevel($valorNumerico),
-                'emoji'  => $this->getUVEmoji($valorNumerico),
-                'hora'   => $ultimaLectura['hora'] ?? null,
+                'valor'     => $valorNumerico,
+                'riesgo'    => $this->getUVLevel($valorNumerico),
+                'emoji'     => $this->getUVEmoji($valorNumerico),
+                'hora'      => $ultimaLectura['hora'] ?? null,
+                'historico' => $historico, // <-- Esto alimenta al UVImageService
             ];
 
         } catch (\Exception $e) {
