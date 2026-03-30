@@ -8,20 +8,19 @@ use Illuminate\Support\Facades\Log;
 class UVService
 {
     /**
-     * Códigos Nacionales oficiales de la DMC
+     * Códigos Nacionales oficiales de la DMC para UV
      */
     protected $config = [
         'STGO' => [
-            'codigo' => 330020, // Quinta Normal
+            'codigo' => '330020', // Quinta Normal
             'nombre' => 'Santiago'
         ],
         'ANTOF' => [
-            'codigo' => 230002, // Cerro Moreno (Confirmar en el JSON completo)
+            'codigo' => '180016', // Cerro Moreno (UV Específico)
             'nombre' => 'Antofagasta'
         ]
     ];
 
-    // URL base con tus credenciales
     protected $baseUrl = 'https://climatologia.meteochile.gob.cl/application/servicios/getRecienteUvb';
     protected $usuario = 'celabarcassi@gmail.com';
     protected $token   = '3432820e92bb80947ae7943f';
@@ -32,7 +31,6 @@ class UVService
         if (!isset($this->config[$region])) return null;
 
         try {
-            // 1. Petición a la API oficial
             $response = Http::timeout(15)->get($this->baseUrl, [
                 'usuario' => $this->usuario,
                 'token'   => $this->token
@@ -41,28 +39,31 @@ class UVService
             if ($response->failed()) return null;
 
             $data = $response->json();
-            $codigoBuscado = $this->config[$region]['codigo'];
+            $codigoBuscado = (string) $this->config[$region]['codigo'];
 
-            // 2. Buscar la estación en el array de datosRecientes
+            // Buscamos la estación comparando como string para mayor seguridad
             $estacionData = collect($data['datosRecientes'] ?? [])
-                ->firstWhere('estacion.codigoNacional', $codigoBuscado);
+                ->first(function ($item) use ($codigoBuscado) {
+                    return isset($item['estacion']['codigoNacional']) &&
+                           (string)$item['estacion']['codigoNacional'] === $codigoBuscado;
+                });
 
             if (!$estacionData || empty($estacionData['indiceUV'])) {
-                Log::warning("UVService: No se encontraron datos para la estación {$codigoBuscado}");
+                Log::warning("UVService: Sin datos UV para la estación {$codigoBuscado} ({$region})");
                 return null;
             }
 
-            // 3. Obtener la última lectura (el final del array es lo más reciente)
+            // Obtenemos la última lectura del array
             $ultimaLectura = collect($estacionData['indiceUV'])->last();
 
-            $valorNumerico = (int) ($ultimaLectura['indiceUV'] ?? 0);
-            $riesgo = $this->getUVLevel($valorNumerico);
+            // Si el índice no viene, asumimos 0 (noche o sensor inactivo)
+            $valorNumerico = isset($ultimaLectura['indiceUV']) ? (int)$ultimaLectura['indiceUV'] : 0;
 
             return [
                 'valor'  => $valorNumerico,
-                'riesgo' => $riesgo,
+                'riesgo' => $this->getUVLevel($valorNumerico),
                 'emoji'  => $this->getUVEmoji($valorNumerico),
-                'hora_utc' => $ultimaLectura['hora'] ?? null, // Útil para debug
+                'hora'   => $ultimaLectura['hora'] ?? null,
             ];
 
         } catch (\Exception $e) {
@@ -71,9 +72,6 @@ class UVService
         }
     }
 
-    /**
-     * Mapea el valor a la categoría de riesgo de la DMC/OMS
-     */
     private function getUVLevel(int $valor): string
     {
         if ($valor <= 2) return 'BAJO';
@@ -85,10 +83,10 @@ class UVService
 
     private function getUVEmoji(int $indice): string
     {
-        if ($indice <= 2) return '🟢'; // Bajo
-        if ($indice <= 5) return '🟡'; // Moderado
-        if ($indice <= 7) return '🟠'; // Alto
-        if ($indice <= 10) return '🔴'; // Muy Alto
-        return '🟣'; // Extremo
+        if ($indice <= 2) return '🟢';
+        if ($indice <= 5) return '🟡';
+        if ($indice <= 7) return '🟠';
+        if ($indice <= 10) return '🔴';
+        return '🟣';
     }
 }

@@ -55,15 +55,14 @@ class PostWeatherUpdate extends Command
         $horaActual = $now->format('H:i');
 
         try {
-            // 1. Obtener datos de la estación (API DMC 12 Horas)
-            // Esta es ahora nuestra fuente primaria para Temp, Humedad, Viento y Presión
+            // 1. Datos base desde la DMC (MeteoDataService)
             $extras = $this->meteo->getStationDetails($region);
 
-            // Fallback: Si la DMC falla, intentamos WeatherService (OpenWeather/Scraping)
+            // Fallback si la DMC falla
             $temp = $extras ? $extras['temperatura'] : $this->weather->getTemperature($region);
 
-            if (!$temp) {
-                throw new \Exception("No se pudo obtener la temperatura ni de la DMC ni del fallback para {$region}");
+            if (!$temp && !is_numeric($temp)) {
+                throw new \Exception("No se pudo obtener la temperatura para {$region}");
             }
 
             // 2. Datos complementarios
@@ -75,7 +74,7 @@ class PostWeatherUpdate extends Command
             $text = "";
             $imagePath = null;
 
-            // 3. Lógica de Mensajes por hito
+            // 3. Lógica de Mensajes
             switch ($type) {
                 case 'sunrise':
                     $text = "🌅 ¡Buenos días, {$cityName}!\n";
@@ -83,7 +82,7 @@ class PostWeatherUpdate extends Command
                     if (isset($extras['minima_12h'])) {
                         $text .= "Mínima hoy: {$extras['minima_12h']}°C\n";
                     }
-                    $text .= "Faltan 30 min para el amanecer ({$sunData['sunrise']}).\n";
+                    $text .= "Amanecer a las {$sunData['sunrise']}.\n";
                     $text .= "#Amanecer #Chile #{$cityName}";
                     $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type);
                     break;
@@ -98,7 +97,7 @@ class PostWeatherUpdate extends Command
                     }
 
                     if (isset($extras['maxima_12h'])) {
-                        $text .= "Máxima hasta ahora: {$extras['maxima_12h']}°C\n";
+                        $text .= "Máxima hoy: {$extras['maxima_12h']}°C\n";
                     }
 
                     $text .= "Temp. actual: {$temp}°C\n";
@@ -110,9 +109,9 @@ class PostWeatherUpdate extends Command
                     $text = "🌇 ¡Buenas tardes, {$cityName}!\n";
                     $text .= "Temp. actual: {$temp}°C\n";
                     if (isset($extras['maxima_12h'])) {
-                        $text .= "Máxima del día: {$extras['maxima_12h']}°C\n";
+                        $text .= "Máxima hoy: {$extras['maxima_12h']}°C\n";
                     }
-                    $text .= "Faltan 30 min para el ocaso ({$sunData['sunset']}).\n";
+                    $text .= "Ocaso a las {$sunData['sunset']}.\n\n";
                     $text .= "{$moonMessage}\n";
                     $text .= "#Atardecer #Chile #{$cityName}";
                     $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type);
@@ -124,22 +123,23 @@ class PostWeatherUpdate extends Command
 
                     if ($extras) {
                         if ($extras['humedad']) $text .= "💧 Humedad: {$extras['humedad']}% ";
-                        if ($extras['viento'])  $text .= "🌬️ Viento: {$extras['viento']} km/h\n";
+                        if ($extras['viento'])  $text .= "🌬️ Viento: {$extras['viento']} km/h";
+                        $text .= "\n";
                         if (isset($extras['presion'])) {
                             $text .= "⏲️ Presión: {$extras['presion']} hPa\n";
                         }
                     }
 
-                    if ($uvData && $uvData['valor'] > 0) {
+                    if ($uvData) {
                         $text .= "☀️ UV: {$uvData['valor']} ({$uvData['riesgo']}) {$uvData['emoji']}\n";
                     }
 
-                    $text .= "{$moonMessage}\n";
+                    $text .= "\n{$moonMessage}\n";
                     $text .= "#Chile #Clima #{$cityName}";
                     break;
             }
 
-            // 4. Envío a X (Twitter)
+            // 4. Envío a X
             $xService = new XService($region);
 
             if ($imagePath) {
