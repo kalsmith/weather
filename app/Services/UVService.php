@@ -4,25 +4,27 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Symfony\Component\DomCrawler\Crawler;
 
 class UVService
 {
     /**
-     * Configuramos las URLs directas a los componentes (saltando el iframe)
+     * Códigos Nacionales oficiales de la DMC
      */
     protected $config = [
         'STGO' => [
-            // URL del componente real de Santiago
-            'url' => 'https://www.meteochile.gob.cl/PortalDMC-web/pronostico_general.xhtml',
-            'type' => 'table_class'
+            'codigo' => 330020, // Quinta Normal
+            'nombre' => 'Santiago'
         ],
         'ANTOF' => [
-            // URL del componente real de radiación de regiones
-            'url' => 'https://www.meteochile.gob.cl/PortalDMC-web/otros_pronosticos/radiacion_uv_region.xhtml?estacion=230001',
-            'type' => 'id_based'
+            'codigo' => 230002, // Cerro Moreno (Confirmar en el JSON completo)
+            'nombre' => 'Antofagasta'
         ]
     ];
+
+    // URL base con tus credenciales
+    protected $baseUrl = 'https://climatologia.meteochile.gob.cl/application/servicios/getRecienteUvb';
+    protected $usuario = 'celabarcassi@gmail.com';
+    protected $token   = '3432820e92bb80947ae7943f';
 
     public function getUVData(string $region = 'STGO'): ?array
     {
@@ -30,62 +32,55 @@ class UVService
         if (!isset($this->config[$region])) return null;
 
         try {
-            $response = Http::withHeaders([
-                'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            ])->timeout(12)->get($this->config[$region]['url']);
+            // 1. Petición a la API oficial
+            $response = Http::timeout(15)->get($this->baseUrl, [
+                'usuario' => $this->usuario,
+                'token'   => $this->token
+            ]);
 
             if ($response->failed()) return null;
 
-            $crawler = new Crawler($response->body());
-            $indice = null;
-            $riesgo = 'N/A';
+            $data = $response->json();
+            $codigoBuscado = $this->config[$region]['codigo'];
 
-            if ($this->config[$region]['type'] === 'id_based') {
-                // Lógica Antofagasta (Intentar ID primero, luego posición)
-                $nodeIndice = $crawler->filter('#indice_obs');
-                if ($nodeIndice->count() > 0) {
-                    $indice = trim($nodeIndice->text());
-                    $riesgo = $crawler->filter('#riesgo')->count() > 0 ? trim($crawler->filter('#riesgo')->text()) : 'N/A';
-                } else {
-                    // Fallback para tablas de regiones (estilo obsTable)
-                    $tabla = $crawler->filter('table#obsTable');
-                    if ($tabla->count() > 0) {
-                        $celdas = $tabla->filter('td');
-                        // El índice suele ser la 5ta celda y riesgo la 6ta
-                        $indice = $celdas->count() >= 5 ? trim($celdas->at(4)->text()) : null;
-                        $riesgo = $celdas->count() >= 6 ? trim($celdas->at(5)->text()) : 'N/A';
-                    }
-                }
-            } else {
-                // Lógica Santiago (Tabla por clases en pronostico_general)
-                $tabla = $crawler->filter('table.tablaObservado')->first();
-                if ($tabla->count() > 0) {
-                    $cells = $tabla->filter('td.tablaObservadoDatos');
-                    // En el componente de Santiago, la posición puede variar, aseguramos captura:
-                    if ($cells->count() >= 3) {
-                        $indice = trim($cells->at(1)->text());
-                        $riesgo = trim($cells->at(2)->text());
-                    }
-                }
-            }
+            // 2. Buscar la estación en el array de datosRecientes
+            $estacionData = collect($data['datosRecientes'] ?? [])
+                ->firstWhere('estacion.codigoNacional', $codigoBuscado);
 
-            // Si el índice no es numérico o es el placeholder "-" de la DMC, abortamos
-            if (empty($indice) || !is_numeric(substr($indice, 0, 1))) {
+            if (!$estacionData || empty($estacionData['indiceUV'])) {
+                Log::warning("UVService: No se encontraron datos para la estación {$codigoBuscado}");
                 return null;
             }
 
-            $valorNumerico = (int)$indice;
+            // 3. Obtener la última lectura (el final del array es lo más reciente)
+            $ultimaLectura = collect($estacionData['indiceUV'])->last();
+
+            $valorNumerico = (int) ($ultimaLectura['indiceUV'] ?? 0);
+            $riesgo = $this->getUVLevel($valorNumerico);
 
             return [
                 'valor'  => $valorNumerico,
                 'riesgo' => $riesgo,
                 'emoji'  => $this->getUVEmoji($valorNumerico),
+                'hora_utc' => $ultimaLectura['hora'] ?? null, // Útil para debug
             ];
 
         } catch (\Exception $e) {
             Log::error("UVService Error ({$region}): " . $e->getMessage());
             return null;
         }
+    }
+
+    /**
+     * Mapea el valor a la categoría de riesgo de la DMC/OMS
+     */
+    private function getUVLevel(int $valor): string
+    {
+        if ($valor <= 2) return 'BAJO';
+        if ($valor <= 5) return 'MODERADO';
+        if ($valor <= 7) return 'ALTO';
+        if ($valor <= 10) return 'MUY ALTO';
+        return 'EXTREMO';
     }
 
     private function getUVEmoji(int $indice): string
