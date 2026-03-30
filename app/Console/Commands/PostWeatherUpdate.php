@@ -117,14 +117,15 @@ class PostWeatherUpdate extends Command
                     $imagePath = $this->image->generate($region, $temp, $moonDataRaw, $sunData, $type);
                     break;
 
-                default: // CLIMA ESTÁNDAR
+                    default: // CLIMA ESTÁNDAR
                     $text = "🌡️ Reporte de Clima: {$cityName}\n";
                     $text .= "Hora: {$horaActual} | Temp: {$temp}°C\n";
 
                     if ($extras) {
                         if ($extras['humedad']) $text .= "💧 Humedad: {$extras['humedad']}% ";
                         if ($extras['viento'])  $text .= "🌬️ Viento: {$extras['viento']} km/h";
-                        $text .= "\n";
+                        $text .= "\n"; // Salto de línea después de humedad/viento
+
                         if (isset($extras['presion'])) {
                             $text .= "⏲️ Presión: {$extras['presion']} hPa\n";
                         }
@@ -134,9 +135,13 @@ class PostWeatherUpdate extends Command
                         $text .= "☀️ UV: {$uvData['valor']} ({$uvData['riesgo']}) {$uvData['emoji']}\n";
                     }
 
+                    // Forzamos un salto doble antes de la luna para que respire
                     $text .= "\n{$moonMessage}\n";
                     $text .= "#Chile #Clima #{$cityName}";
                     break;
+
+
+
             }
 
             // 4. Envío a X

@@ -7,7 +7,8 @@ use Illuminate\Support\Facades\Log;
 
 class MeteoDataService
 {
-    protected $baseUrl = 'https://climatologia.meteochile.gob.cl/application/servicios/getRecienteRecienteEstacion';
+    // URL para datos de las últimas 12 horas (más completo)
+    protected $baseUrl = 'https://climatologia.meteochile.gob.cl/application/servicios/getDatosRecientesEma';
     protected $usuario = 'celabarcassi@gmail.com';
     protected $token   = '3432820e92bb80947ae7943f';
 
@@ -24,29 +25,33 @@ class MeteoDataService
         if (!$codigo) return null;
 
         try {
-            $response = Http::timeout(15)->get($this->baseUrl, [
+            // El endpoint correcto para el JSON que pasaste es /getDatosRecientesEma/{codigo}
+            $response = Http::timeout(15)->get("{$this->baseUrl}/{$codigo}", [
                 'usuario' => $this->usuario,
                 'token'   => $this->token,
-                'codigo'  => $codigo
             ]);
 
             if ($response->failed()) return null;
 
             $data = $response->json();
 
-            // Tomamos el registro más reciente (índice 0)
+            // La estructura es datosEstaciones -> datos -> [0]
             $actual = $data['datosEstaciones']['datos'][0] ?? null;
 
-            if (!$actual) return null;
+            if (!$actual) {
+                Log::warning("MeteoDataService: No hay datos para la estación {$codigo}");
+                return null;
+            }
 
             return [
-                'temperatura' => (float)$actual['temperatura'],
-                'humedad'     => (int)$actual['humedadRelativa'],
-                'viento'      => $this->knotsToKmh($actual['fuerzaDelVientoPromedio10Minutos']),
-                'presion'     => (float)$actual['presionEstacion'],
-                'maxima_12h'  => (float)$actual['temperaturaMaxima12Horas'],
-                'minima_12h'  => (float)$actual['temperaturaMinima12Horas'],
-                'radiacion'   => (float)$actual['radiacionGlobalInst'], // Watt/m2
+                // Usamos cleanValue para quitar "°C", "%", "hPas.", etc.
+                'temperatura' => $this->cleanValue($actual['temperatura']),
+                'humedad'     => (int) $this->cleanValue($actual['humedadRelativa']),
+                'viento'      => $this->knotsToKmh($this->cleanValue($actual['fuerzaDelViento'])),
+                'presion'     => $this->cleanValue($actual['presionEstacion']),
+                'maxima_12h'  => $this->cleanValue($actual['temperaturaMaxima12Horas']),
+                'minima_12h'  => $this->cleanValue($actual['temperaturaMinima12Horas']),
+                'radiacion'   => $this->cleanValue($actual['radiacionGlobalInst']),
                 'momento'     => $actual['momento'],
             ];
 
@@ -56,9 +61,23 @@ class MeteoDataService
         }
     }
 
+    /**
+     * Limpia el string de la DMC para convertirlo en un número válido.
+     * Ejemplo: "27.6 °C" -> 27.6 | "27 %" -> 27 | "954.1 hPas." -> 954.1
+     */
+    private function cleanValue($value): float
+    {
+        if (is_null($value)) return 0.0;
+
+        // Quita cualquier cosa que no sea número, punto o signo negativo
+        $cleaned = preg_replace('/[^0-9\.\-]/', '', $value);
+
+        return (float) $cleaned;
+    }
+
     private function knotsToKmh($knots): float
     {
-        // La DMC entrega el viento en nudos (kt). 1 kt = 1.852 km/h
+        // 1 kt = 1.852 km/h
         return round((float)$knots * 1.852, 1);
     }
 }
