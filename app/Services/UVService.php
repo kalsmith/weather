@@ -18,6 +18,10 @@ class UVService
         'ANTOF' => [
             'codigo' => '180016', // Cerro Moreno (UV Específico)
             'nombre' => 'Antofagasta'
+        ],
+        'PUQ' => [
+            'codigo' => '520006', // Carlos Ibáñez (UV Específico)
+            'nombre' => 'Punta Arenas'
         ]
     ];
 
@@ -67,7 +71,7 @@ class UVService
                 'riesgo'    => $this->getUVLevel($valorNumerico),
                 'emoji'     => $this->getUVEmoji($valorNumerico),
                 'hora'      => $ultimaLectura['hora'] ?? null,
-                'historico' => $historico, // <-- Esto alimenta al UVImageService
+                'historico' => $historico, // Alimenta al UVImageService
             ];
 
         } catch (\Exception $e) {

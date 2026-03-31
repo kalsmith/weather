@@ -15,6 +15,7 @@ class MeteoDataService
     protected $estaciones = [
         'STGO'  => '330020', // Quinta Normal
         'ANTOF' => '230002', // Cerro Moreno
+        'PUQ'   => '520014', // Carlos Ibáñez del Campo (Punta Arenas)
     ];
 
     public function getStationDetails(string $region): ?array
@@ -25,7 +26,6 @@ class MeteoDataService
         if (!$codigo) return null;
 
         try {
-            // El endpoint correcto para el JSON que pasaste es /getDatosRecientesEma/{codigo}
             $response = Http::timeout(15)->get("{$this->baseUrl}/{$codigo}", [
                 'usuario' => $this->usuario,
                 'token'   => $this->token,
@@ -34,8 +34,6 @@ class MeteoDataService
             if ($response->failed()) return null;
 
             $data = $response->json();
-
-            // La estructura es datosEstaciones -> datos -> [0]
             $actual = $data['datosEstaciones']['datos'][0] ?? null;
 
             if (!$actual) {
@@ -44,7 +42,6 @@ class MeteoDataService
             }
 
             return [
-                // Usamos cleanValue para quitar "°C", "%", "hPas.", etc.
                 'temperatura' => $this->cleanValue($actual['temperatura']),
                 'humedad'     => (int) $this->cleanValue($actual['humedadRelativa']),
                 'viento'      => $this->knotsToKmh($this->cleanValue($actual['fuerzaDelViento'])),
@@ -61,9 +58,6 @@ class MeteoDataService
         }
     }
 
-    /**
-     * Obtiene datos de pronóstico (máximas, mínimas y ráfagas) desde el servicio de Riesgo de Incendio.
-     */
     public function getFireRiskData(string $region): ?array
     {
         $region = strtoupper($region);
@@ -83,7 +77,6 @@ class MeteoDataService
 
             $data = $response->json();
 
-            // Buscamos la estación por su Código Nacional dentro de las "features"
             $feature = collect($data['features'])->first(function ($f) use ($codigoBuscado) {
                 return (string) ($f['properties']['CodigoNacional'] ?? '') === (string) $codigoBuscado;
             });
@@ -96,11 +89,11 @@ class MeteoDataService
             $p = $feature['properties'];
 
             return [
-                'temperaturaMaximaHoy'     => $this->cleanValue($p['temperaturaMaximaHoy'] ?? null),
-                'temperaturaMaximaManana'  => $this->cleanValue($p['temperaturaMaximaManana'] ?? null),
-                'humedadMinimaHoy'         => $this->cleanValue($p['humedadMinimaHoy'] ?? null),
-                'intensidadVientoMaximoHoy'=> $this->cleanValue($p['intensidadVientoMaximoHoy'] ?? null),
-                'momento'                  => $p['momento'] ?? null,
+                'temperaturaMaximaHoy'      => $this->cleanValue($p['temperaturaMaximaHoy'] ?? null),
+                'temperaturaMaximaManana'   => $this->cleanValue($p['temperaturaMaximaManana'] ?? null),
+                'humedadMinimaHoy'          => $this->cleanValue($p['humedadMinimaHoy'] ?? null),
+                'intensidadVientoMaximoHoy' => $this->cleanValue($p['intensidadVientoMaximoHoy'] ?? null),
+                'momento'                   => $p['momento'] ?? null,
             ];
 
         } catch (\Exception $e) {
@@ -109,25 +102,15 @@ class MeteoDataService
         }
     }
 
-
-
-    /**
-     * Limpia el string de la DMC para convertirlo en un número válido.
-     * Ejemplo: "27.6 °C" -> 27.6 | "27 %" -> 27 | "954.1 hPas." -> 954.1
-     */
     private function cleanValue($value): float
     {
         if (is_null($value)) return 0.0;
-
-        // Quita cualquier cosa que no sea número, punto o signo negativo
         $cleaned = preg_replace('/[^0-9\.\-]/', '', $value);
-
         return (float) $cleaned;
     }
 
     private function knotsToKmh($knots): float
     {
-        // 1 kt = 1.852 km/h
         return round((float)$knots * 1.852, 1);
     }
 }

@@ -50,6 +50,7 @@ class PostWeatherUpdate extends Command
         $config = [
             'STGO'  => ['name' => 'Santiago', 'tz' => 'America/Santiago'],
             'ANTOF' => ['name' => 'Antofagasta', 'tz' => 'America/Santiago'],
+            'PUQ'   => ['name' => 'Punta Arenas', 'tz' => 'America/Santiago'], // ¡Agrégame!
         ];
 
         $cityName = $config[$region]['name'] ?? $region;
